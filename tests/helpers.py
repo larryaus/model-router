@@ -58,3 +58,13 @@ def seed_codex(paths, five, week, now=NOW):
         )],
         mtime=now,
     )
+
+
+from model_router.config import build_config
+
+
+def default_config(**overrides):
+    """The built-in defaults, with top-level keys overridden."""
+    config, errors = build_config(overrides)
+    assert config is not None, errors
+    return config
