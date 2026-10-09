@@ -6,6 +6,7 @@ import sys
 import time
 from typing import List
 
+from model_router import codex_run
 from model_router.classify import classify
 from model_router.config import PERMISSION_MODES, PLANS, build_config, load_config
 from model_router.decision_log import read_recent
@@ -163,6 +164,9 @@ def _parser() -> argparse.ArgumentParser:
     )
     log = commands.add_parser("log", help="show recent decisions")
     log.add_argument("-n", type=int, default=20)
+    worker = commands.add_parser("codex-run", help="run one task through Codex")
+    worker.add_argument("mode", choices=("read", "write"))
+    worker.add_argument("prompt_file")
     return parser
 
 
@@ -182,4 +186,8 @@ def main(argv: List[str]) -> int:
         ))
     elif args.command == "log":
         print(render_log(paths, args.n))
+    elif args.command == "codex-run":
+        code, text = codex_run.run(args.mode, args.prompt_file, os.getcwd())
+        print(text)
+        return code
     return 0
