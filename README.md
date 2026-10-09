@@ -37,9 +37,9 @@ functions. The adapters do the reading and writing; the core takes plain
 values and returns a decision, so it can be tested without Claude Code.
 
 ```mermaid
-flowchart LR
-    subgraph CC["Claude Code"]
-        SL["Status line"]
+flowchart TB
+    subgraph CC["Claude Code events"]
+        SL["Status line renders"]
         UP["Prompt submitted"]
         AG["Subagent launch<br/>Agent tool"]
     end
@@ -50,9 +50,12 @@ flowchart LR
         PAH["hooks/pre_agent.py"]
     end
 
+    PT["Your previous<br/>status-line command"]
+    SNAP[("claude-quota.json")]
+
     subgraph IN["Inputs, read fresh on every run"]
-        CFG["config.py<br/>config.jsonc"]
         QR["quota readers<br/>Claude snapshot · Codex logs"]
+        CFG["config.py<br/>config.jsonc"]
         PM["hooks/permissions.py<br/>Claude Code settings"]
     end
 
@@ -61,13 +64,13 @@ flowchart LR
         PO["policy.py<br/>levels · eligibility · decide"]
     end
 
-    subgraph FX["Effects"]
-        SNAP[("claude-quota.json")]
-        DLOG[("decisions.jsonl")]
-        GR["grants.py<br/>one-time grant"]
+    subgraph OUT["Outcomes"]
+        HINT["One line of guidance<br/>when a level changes"]
+        DLOG[("decisions.jsonl<br/>every decision")]
+        ACT["Launch kept, given a<br/>new model, or denied"]
+        GR["Redirect to Codex<br/>grants.py issues a grant"]
     end
 
-    PT["Your previous<br/>status-line command"]
     WK["codex-read / codex-write<br/>worker agent"]
     CR["codex_run.py<br/>redeems the grant"]
     CX["codex exec<br/>pinned sandbox"]
@@ -76,27 +79,31 @@ flowchart LR
     UP --> PRH
     AG --> PAH
 
-    SLH -- "captures quota" --> SNAP
     SLH -- "relays input" --> PT
+    SLH -- "captures quota" --> SNAP
     SNAP --> QR
 
     PAH --> CL
     CL --> PO
     PRH --> PO
-    CFG --> PO
     QR --> PO
-    PM --> PAH
+    CFG --> PO
+    PM --> PO
 
-    PO -- "decision" --> PAH
-    PAH -- "logs every decision" --> DLOG
-    PAH -- "keep · set model · deny" --> AG
-    PAH -- "redirect" --> GR
-    PRH -- "one line when a level changes" --> UP
+    PO --> HINT
+    PO --> DLOG
+    PO --> ACT
+    PO --> GR
 
     GR --> WK
     WK --> CR
     CR --> CX
 ```
+
+Read it top to bottom. Each Claude Code event reaches one adapter. The two
+hooks hand the launch and the current inputs to the core, and the core's
+answer becomes one of the outcomes at the bottom. The status line takes no
+decisions: it only saves the quota reading that the next decision will use.
 
 | Part | Files | Job |
 |---|---|---|
@@ -152,25 +159,24 @@ sequenceDiagram
     autonumber
     participant C as Claude Code
     participant H as pre_agent hook
-    participant S as State directory
-    participant W as Worker agent on Haiku
-    participant R as router codex-run
+    participant W as Worker agent
+    participant R as codex-run
     participant X as codex exec
 
-    C->>H: PreToolUse on Agent with prompt, agent type, permission mode, cwd
-    H->>H: classify, read quota, check eligibility, decide
-    H->>S: write grant with sandbox mode, effort, model, cwd
-    H-->>C: rewritten launch, prompt begins with the grant's nonce
+    C->>H: subagent launch
+    Note over H: classify, read quota,<br/>check eligibility, decide
+    Note over H: write a one-time grant<br/>sandbox, effort, model, cwd
+    H-->>C: rewritten launch<br/>prompt carries the nonce
     C->>W: launch the worker
-    W->>R: codex-run with the prompt file
-    R->>S: redeem the grant, deleted on first use
-    alt grant valid and mode matches
-        R->>X: sandbox and directory from the grant, owner's Codex config ignored
+    W->>R: prompt file
+    Note over R: redeem the grant<br/>deleted on first use
+    alt grant valid, mode matches
+        R->>X: sandbox and cwd from the grant<br/>owner's Codex config ignored
         X-->>R: final answer
         R-->>W: answer
         W-->>C: answer, verbatim
-    else grant missing, used, expired, or for the other mode
-        R-->>W: refuses and Codex never starts
+    else missing, used, expired, wrong mode
+        R-->>W: refuses, Codex never starts
     end
 ```
 
