@@ -28,7 +28,10 @@ priority order:
 - When a plan reaches `conserve` or worse, no launch is sent to a target that
   level disallows, unless the owner tagged the task with an explicit override.
 - A routing decision adds under 100 ms to a launch in the warm case.
-- No router failure of any kind blocks or alters a launch.
+- No router failure of any kind blocks or alters a launch. A missing or
+  invalid configuration counts as a failure for this purpose.
+- A redirect to Codex never gives a task wider file access than the session
+  that launched it had.
 
 ### What was stated and what is assumed
 
@@ -128,8 +131,15 @@ Categories: `plan`, `implement`, `review`, `explore`, `debug`, `default`.
 
 ### 3.3 Policy engine (`model_router/policy.py`)
 
-`decide(classification, agent_type, quotas, config, now) -> Decision`.
+`decide(classification, launch, quotas, config, now) -> Decision`.
 Pure: no I/O, and time is passed in. Section 4 defines its behaviour.
+
+```python
+Launch(agent_type: str,
+       permission_mode: Optional[str],   # from the hook input; None if absent
+       nested: bool,                     # launched from inside a subagent
+       file_deny_rules: Optional[bool])  # None if settings were unreadable
+```
 
 ```python
 Decision(action: str,            # keep | set_model | redirect_codex | deny
@@ -147,7 +157,13 @@ hook response.
   input carries `subagent_type`, `model`, `description`, and `prompt`. It
   applies the decision through `hookSpecificOutput.updatedInput`, which it
   always sends as the complete tool input with its changes applied, or through
-  a `deny` permission decision.
+  a `deny` permission decision. It builds the `Launch` value from the hook
+  input: `permission_mode`, whether `agent_id` is present (a nested launch),
+  and `cwd`.
+- `permissions.py`: a helper for `pre_agent.py`. Given `cwd`, it reports
+  whether any `permissions.deny` rule scoped to `Read`, `Edit`, or `Write`
+  exists in the user, project, project-local, or managed Claude Code settings
+  files. It returns `None` if any of those files exists but cannot be parsed.
 - `prompt.py`: the `UserPromptSubmit` hook. It injects one line through
   `additionalContext` when a plan's level differs from the level last announced
   in this session.
@@ -165,6 +181,19 @@ almost no Claude quota.
 The pre-launch hook passes the reasoning effort to the worker as a first line
 of the prompt, `ROUTER_EFFORT: <effort>`, which the worker strips and passes to
 Codex.
+
+Each worker fixes its own boundary and does not inherit one from Codex's
+configuration:
+
+- It passes `--sandbox` explicitly on every run: `read-only` for `codex-read`,
+  `workspace-write` for `codex-write`.
+- It passes `--cd` with the session's working directory, so writes are confined
+  to that workspace.
+- It never passes a flag that widens or bypasses the sandbox, and never adds
+  extra writable directories.
+- Its `codex exec` call is an ordinary Bash call. It goes through Claude Code's
+  permission system like any other command, so the session's allow, ask, and
+  deny rules for Bash still apply to it.
 
 ### 3.6 CLI (`bin/router`)
 
@@ -201,8 +230,11 @@ model or effort, and a weight. The engine walks the list and picks the first
 target that passes both checks:
 
 - its weight is allowed at its plan's current level;
-- if it is on the Codex plan, the launch's agent type is in `redirectable`
-  (see 4.4).
+- if it is on the Codex plan, the launch is eligible for redirect (see 4.4).
+
+A Codex target that fails the second check is skipped, never downgraded. The
+engine moves on to the next entry, so the task stays on Claude with its
+original permissions and only its model can change.
 
 If no entry passes, the engine considers every defined target subject to the
 same two checks and picks the one with the lightest weight, breaking ties by
@@ -225,19 +257,47 @@ would reject.
 - **Passthrough.** Agent types listed in `passthrough`, the router's own
   workers, and `fork` launches are never altered. This also prevents redirect
   loops.
-- **Redirectable.** A custom agent's behaviour comes from its own system
-  prompt, which a redirect to Codex would discard. Only agent types listed in
-  `redirectable` may be sent to Codex. Default: `general-purpose`, `claude`,
-  `Explore`, `Plan`, `explorer`. All other agent types receive Claude model
-  changes only.
-- **Read-only stays read-only.** A redirected launch uses `codex-read` unless
-  its category is in `write_categories` (default: `implement`, `debug`,
-  `default`) and its agent type is not in `readonly_agents` (default:
-  `Explore`, `Plan`, `explorer`).
+- **Which worker a launch needs.** A launch needs `codex-write` when its
+  category is in `write_categories` (default: `implement`, `debug`, `default`)
+  and its agent type is not in `readonly_agents` (default: `Explore`, `Plan`,
+  `explorer`). Otherwise it needs `codex-read`. A read-only agent type never
+  gets the write worker.
+- **Redirect eligibility.** A redirect moves a task out of Claude Code's
+  permission system and into Codex's sandbox, so it is allowed only when the
+  sandbox's file access is no wider than what the session already permits. A
+  launch is eligible only if all of these hold:
+  1. *Agent type.* It is listed in `redirectable` (default: `general-purpose`,
+     `claude`, `Explore`, `Plan`, `explorer`). A custom agent's behaviour and
+     tool limits come from its own definition, which a redirect would discard.
+  2. *Not nested.* It was launched by the main conversation. A launch made
+     from inside another subagent inherits that subagent's tool limits, which
+     the hook cannot see.
+  3. *Permission mode.* The session's `permission_mode` is listed in
+     `read_redirect_modes` if the launch needs `codex-read`, or in
+     `write_redirect_modes` if it needs `codex-write`. See the table below.
+  4. *No file-scoped deny rules.* No `Read`, `Edit`, or `Write` deny rule
+     exists in the Claude Code settings that apply to the session. Codex
+     cannot honour per-path rules, so their presence rules out any redirect.
+
+  Anything unknown fails the check: a missing or unrecognised
+  `permission_mode`, or settings that could not be read. A launch that fails
+  any check still receives Claude model changes.
+
+  | `permission_mode` | `codex-read` | `codex-write` |
+  |---|---|---|
+  | `plan` | no | no |
+  | `default`, `auto` | yes | no |
+  | `acceptEdits`, `bypassPermissions` | yes | yes |
+  | `dontAsk`, missing, or unrecognised | no | no |
+
+  These are the defaults of `read_redirect_modes` and `write_redirect_modes`.
+  `plan` may not be added to either list. Adding a mode to
+  `write_redirect_modes` is the owner stating that unattended edits inside the
+  workspace sandbox are acceptable in that mode.
 - **Overrides.** `[route:<target>]` replaces the preference list with that one
   target and skips balance. It ignores `conserve` and `critical`, because the
-  owner asked for that target explicitly. It still obeys `exhausted` and the
-  redirectable rule; if either rejects it, routing falls back to the normal
+  owner asked for that target explicitly. It still obeys `exhausted` and
+  redirect eligibility; if either rejects it, routing falls back to the normal
   preference list and the reason says why. `[route:keep]` leaves the launch
   untouched.
 
@@ -245,7 +305,7 @@ would reject.
 
 | Action | Effect on the launch |
 |---|---|
-| keep | No output. The launch proceeds unchanged. Produced by passthrough, `[route:keep]`, and `mode: off`. |
+| keep | No output. The launch proceeds unchanged. Produced by passthrough, `[route:keep]`, `"mode": "off"`, and an invalid config. |
 | set_model | `model` is set to the target's model. |
 | redirect_codex | `subagent_type` becomes the plugin's `codex-read` or `codex-write`, `model` is removed, and the effort line is prepended to the prompt. |
 | deny | The launch is denied with the reason. |
@@ -269,11 +329,23 @@ Nothing is injected while levels are unchanged.
 ## 5. Configuration
 
 File: `~/.config/model-router/config.jsonc`. JSON with `//` and `/* */`
-comments. Missing keys take the defaults shown.
+comments.
+
+The router alters launches only when this file exists, passes validation, and
+sets `"mode": "enforce"`. The three possible states:
+
+| Config file | Behaviour |
+|---|---|
+| Valid | As written. Keys left out take the defaults shown below, except `mode`, whose default is `shadow`. |
+| Absent | Built-in defaults in `shadow` mode: decisions are logged, nothing is altered. |
+| Invalid (syntax error, failed validation, or unknown key) | Inert. Every launch is kept unchanged, whatever `mode` the file asks for. See section 7. |
+
+The example below shows every key with its default value, apart from `mode`,
+which is set to `enforce` here to show a working configuration.
 
 ```jsonc
 {
-  "mode": "enforce",            // "enforce" | "shadow" | "off"
+  "mode": "enforce",            // "enforce" | "shadow" | "off"; default "shadow"
   "targets": {
     "opus":       { "plan": "claude", "model": "opus",   "weight": "heavy"  },
     "sonnet":     { "plan": "claude", "model": "sonnet", "weight": "medium" },
@@ -306,14 +378,24 @@ comments. Missing keys take the defaults shown.
   "redirectable": ["general-purpose", "claude", "Explore", "Plan", "explorer"],
   "readonly_agents": ["Explore", "Plan", "explorer"],
   "write_categories": ["implement", "debug", "default"],
+  "read_redirect_modes":  ["default", "auto", "acceptEdits", "bypassPermissions"],
+  "write_redirect_modes": ["acceptEdits", "bypassPermissions"],
   "statusline": { "passthrough": null }  // command to run after capture
 }
 ```
 
 `config.py` validates the file by hand and reports each problem with its key
-path. Validation checks: every preference entry names a defined target; every
-target has a known plan and weight; thresholds are ordered
-`conserve < critical < exhausted`; `underused < overused`.
+path. Validation checks: no unknown keys at any level, so a mistyped key is an
+error and not a silent default; `mode` is one of the three values; every
+preference entry names a defined target; every target has a known plan and
+weight; thresholds are ordered `conserve < critical < exhausted`;
+`underused < overused`; both redirect-mode lists contain only known permission
+modes and never `plan`; `write_redirect_modes` is a subset of
+`read_redirect_modes`.
+
+`config.py` returns one of three results, matching the table above: a valid
+config, the built-in shadow config, or an invalid marker carrying the list of
+errors. It never returns a partially applied file.
 
 Environment: `MODEL_ROUTER=off` disables routing for a session.
 `MODEL_ROUTER_CONFIG` and `MODEL_ROUTER_STATE_DIR` override the file locations,
@@ -342,9 +424,15 @@ rename. Files are created with owner-only permissions.
   launch or prompt proceeds unchanged. If writing the log also fails, the
   error is dropped and the hook still exits 0.
 - **Unknown quota.** Treated as `normal`, stated in the reason.
-- **Invalid config.** Built-in defaults are used. `router status` prints the
+- **Invalid config.** The router goes inert: the pre-launch hook keeps every
+  launch unchanged and logs one `config_invalid` record per session. Built-in
+  defaults are not applied, because they could redirect work that a broken
+  `shadow` or `off` config was meant to leave alone. `router status` prints the
   validation errors, and the prompt hook announces the problem once per
-  session.
+  session. Quota capture by the status line keeps working.
+- **Unknown permission state.** A missing or unrecognised `permission_mode`,
+  or Claude Code settings that cannot be parsed, makes the launch ineligible
+  for redirect. Claude model changes still apply.
 - **Codex worker failure.** The worker returns Codex's error verbatim. The
   router does not retry on Claude, so no task is paid for twice silently.
 - **Passthrough status line.** Run with a 2-second timeout. On failure or
@@ -360,14 +448,26 @@ virtual environment.
 - **Policy engine.** Table-driven tests over quota, config, and task. Cases:
   each threshold boundary, a passed reset, projection before and after warmup,
   fallback to the lightest target, deny, balance promotion and its guards, tag
-  overrides, passthrough, redirectable, and the read-only rule.
+  overrides, passthrough, and the read-only rule.
+- **Redirect eligibility.** One case per row of the permission-mode table, for
+  both workers. Nested launches, non-redirectable agent types, file-scoped deny
+  rules present, and unreadable settings each block a redirect. In every
+  blocked case the test asserts that the result is a Claude target or `keep`,
+  never a read worker standing in for a write worker.
+- **Permissions helper.** Settings fixtures with no deny rules, a `Bash`-only
+  deny rule (does not block), a `Read` deny rule (blocks), and malformed JSON
+  (returns `None`).
 - **Classifier.** Tag, agent type, keyword order, and default.
 - **Quota readers.** Fixture files for valid, empty, truncated, and malformed
   input. A large log file to confirm only the tail is read.
-- **Config.** Comment stripping, defaults, and each validation error.
+- **Config.** Comment stripping, defaults, and each validation error. The
+  three load results: valid, absent (shadow), and invalid (inert).
 - **Hook adapters.** Feed hook JSON on stdin and assert on stdout. Include a
   forced exception to prove fail-open, and `shadow` mode to prove nothing is
-  rewritten.
+  rewritten. With a malformed config file, a config that fails validation, and
+  a config with a mistyped `mode` key, assert that a launch which would
+  otherwise be redirected produces no output at all. Repeat with no config
+  file.
 - **Isolation.** Tests never read `~/.claude`, `~/.codex`, or the real config.
   Paths are injected.
 - **Shadow run.** Before enforcing, run in `shadow` mode on real work for
@@ -405,7 +505,8 @@ model-router/
 │  ├─ decision_log.py
 │  ├─ state.py
 │  ├─ cli.py
-│  └─ hooks/{pre_agent,prompt,statusline}.py
+│  └─ hooks/{pre_agent,prompt,statusline,permissions}.py
+├─ config.example.jsonc
 ├─ tests/
 └─ docs/superpowers/specs/
 ```
@@ -416,14 +517,20 @@ Each phase leaves something usable.
 
 1. **Quota readers and `router status`.** See both plans' windows and levels.
 2. **Config, classifier, policy engine, `router explain`.** Dry-run decisions
-   with no hooks installed.
+   with no hooks installed. Includes redirect eligibility and the three config
+   load results, and ships `config.example.jsonc`.
 3. **Status-line capture and the pre-launch hook in `shadow` mode.** Install
    the plugin, point the status line at `statusline.py` with the existing
    Quota Glass command as its passthrough, and collect real decisions. This
-   phase confirms the launch tool's name and input fields against live hook
-   payloads before anything is rewritten.
-4. **Enforce Claude model changes.** `set_model` and `deny` go live.
-5. **Codex workers and redirect.** `redirect_codex` goes live.
+   phase confirms, against live hook payloads and before anything is
+   rewritten: the launch tool's name and input fields, that `permission_mode`
+   is present on launch events, and that `agent_id` marks nested launches. If
+   `permission_mode` turns out to be absent on this event, redirects stay
+   disabled, which is what the eligibility rules already produce.
+4. **Enforce Claude model changes.** `set_model` and `deny` go live. The owner
+   creates the config file and sets `mode` to `enforce` at this point.
+5. **Codex workers and redirect.** `redirect_codex` goes live, gated by
+   redirect eligibility.
 6. **Prompt-hook guidance, balance, and cleanup.** Remove the manual
    `~/.claude/.usage-exhausted` switch from the owner's existing `explorer`
    agent.
@@ -439,6 +546,15 @@ in phases 3 and 6 and are confirmed with the owner at that point.
   next run.
 - Claude quota refreshes when the status line renders, which requires an open
   Claude Code session. That is always true when a hook fires.
+- Redirect eligibility compares what the hook can see: permission mode,
+  nesting, agent type, and file-scoped deny rules. It cannot see everything
+  Claude Code enforces. Inside a Codex run, the session's Bash allow, ask, and
+  deny rules, the `auto` mode's safety checks, and other plugins' hooks do not
+  apply to the commands Codex itself runs. The Codex sandbox is the boundary
+  there: read-only, or writes confined to the workspace.
+- With the default lists, a session in `default` or `auto` mode never
+  redirects a write task to Codex. Those tasks stay on Claude unless the owner
+  adds the mode to `write_redirect_modes`.
 - Keyword classification is blunt. The `[route:...]` tag and the
   `agent_categories` map are the precise controls.
 - Weekly limits that apply to one model family rather than the whole plan are
