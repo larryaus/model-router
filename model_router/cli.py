@@ -11,6 +11,7 @@ from model_router.config import PERMISSION_MODES, PLANS, build_config, load_conf
 from model_router.decision_log import read_recent
 from model_router.hooks import run_hook
 from model_router.hooks import pre_agent
+from model_router.hooks import statusline
 from model_router.hooks.permissions import has_file_deny_rules, settings_files
 from model_router.paths import Paths, from_env
 from model_router.policy import Launch, decide, plan_level, projected_pct
@@ -138,6 +139,16 @@ def _run_hook_command(argv: List[str]) -> int:
     return 0
 
 
+def _run_statusline() -> int:
+    try:
+        sys.stdout.write(
+            statusline.run(sys.stdin.read(), from_env(os.environ), int(time.time()))
+        )
+    except Exception:
+        pass
+    return 0
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="router", description="Model router for Claude Code."
@@ -158,6 +169,8 @@ def _parser() -> argparse.ArgumentParser:
 def main(argv: List[str]) -> int:
     if argv[:1] == ["hook"]:
         return _run_hook_command(argv[1:])
+    if argv[:1] == ["statusline"]:
+        return _run_statusline()
     args = _parser().parse_args(argv)
     paths = from_env(os.environ)
     now = int(time.time())
