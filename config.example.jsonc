@@ -1,0 +1,63 @@
+// Model router configuration.
+// Copy to ~/.config/model-router/config.jsonc and edit.
+//
+// The router changes launches only when this file exists, passes validation,
+// and sets "mode" to "enforce". A file with any error makes the router inert.
+// Run `router status` to check it.
+{
+  // "enforce": apply decisions. "shadow": log them, change nothing. "off".
+  "mode": "shadow",
+
+  // A target is a model you can route to. "weight" decides when it is paused:
+  // heavy targets stop at conserve, medium at critical, light at exhausted.
+  "targets": {
+    "opus":       { "plan": "claude", "model": "opus",   "weight": "heavy"  },
+    "sonnet":     { "plan": "claude", "model": "sonnet", "weight": "medium" },
+    "haiku":      { "plan": "claude", "model": "haiku",  "weight": "light"  },
+    "codex-deep": { "plan": "codex",  "effort": "xhigh",  "weight": "heavy"  },
+    "codex":      { "plan": "codex",  "effort": "medium", "weight": "medium" }
+  },
+
+  // For each task category, your preferred targets in order.
+  "preferences": {
+    "plan":      ["opus", "codex-deep", "sonnet"],
+    "implement": ["codex-deep", "sonnet", "codex"],
+    "review":    ["codex-deep", "opus", "sonnet"],
+    "explore":   ["haiku", "codex", "sonnet"],
+    "debug":     ["opus", "codex-deep", "sonnet"],
+    "default":   ["sonnet", "codex"]
+  },
+
+  // Percent used at which a plan changes level.
+  "thresholds": { "conserve": 70, "critical": 90, "exhausted": 98 },
+  // Ignore the projection until this fraction of a window has passed.
+  "projection": { "warmup": 0.15 },
+  // Weekly projections that trigger moving work to the other plan.
+  "balance": { "overused": 85, "underused": 60 },
+
+  "agent_categories": { "Explore": "explore", "explorer": "explore", "Plan": "plan" },
+  "keywords": {
+    "review":    ["review", "audit", "critique"],
+    "debug":     ["debug", "root cause", "failing", "flaky", "stack trace"],
+    "plan":      ["plan", "design", "architecture"],
+    "explore":   ["find", "locate", "search", "where is", "trace how"],
+    "implement": ["implement", "add", "build", "refactor", "fix", "write"]
+  },
+
+  // Agent types the router never touches.
+  "passthrough": ["codex-review", "design-review", "implementer",
+                  "statusline-setup", "claude-code-guide"],
+  // Agent types that may be sent to Codex. Others get Claude model changes only.
+  "redirectable": ["general-purpose", "claude", "Explore", "Plan", "explorer"],
+  "readonly_agents": ["Explore", "Plan", "explorer"],
+  "write_categories": ["implement", "debug", "default"],
+
+  // Session permission modes in which a task may be sent to Codex.
+  // Add "auto" to write_redirect_modes to allow unattended edits inside the
+  // Codex workspace sandbox while your session is in auto mode.
+  "read_redirect_modes":  ["default", "auto", "acceptEdits", "bypassPermissions"],
+  "write_redirect_modes": ["acceptEdits", "bypassPermissions"],
+
+  // A command to run after the status line captures quota, or null.
+  "statusline": { "passthrough": null }
+}

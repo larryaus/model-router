@@ -1,0 +1,23 @@
+#!/usr/bin/python3 -I
+"""Entry point for the model router.
+
+Runs in isolated mode, which does not put this script's directory on
+sys.path, so the repository root is added here.
+"""
+
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
+
+try:
+    from model_router.cli import main
+
+    code = main(sys.argv[1:])
+except Exception:
+    # A hook or status line must never fail loudly or block a launch.
+    if sys.argv[1:2] in (["hook"], ["statusline"]):
+        code = 0
+    else:
+        raise
+sys.exit(code)
