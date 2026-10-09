@@ -384,8 +384,24 @@ def raw_statusline_passthrough(path: Path) -> Optional[str]:
     The status line must keep relaying to the owner's previous command even
     while the rest of the config is broken.
     """
+    return read_statusline_passthrough(path)[1]
+
+
+def read_statusline_passthrough(path: Path) -> Tuple[bool, Optional[str]]:
+    """Return (readable, command) for statusline.passthrough.
+
+    `readable` is False only when the file exists but cannot be parsed into
+    an object, which is what a typo looks like. An absent file is readable:
+    it says, deliberately, that there is no passthrough.
+    """
     try:
-        value = _parse_file(path)["statusline"]["passthrough"]
-    except (OSError, ValueError, KeyError, TypeError):
-        return None
-    return value if isinstance(value, str) and value else None
+        raw = _parse_file(path)
+    except FileNotFoundError:
+        return True, None
+    except (OSError, ValueError):
+        return False, None
+    if not isinstance(raw, dict):
+        return False, None
+    statusline = raw.get("statusline")
+    value = statusline.get("passthrough") if isinstance(statusline, dict) else None
+    return True, (value if isinstance(value, str) and value else None)

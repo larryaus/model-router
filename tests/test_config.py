@@ -3,6 +3,7 @@ import pytest
 from model_router.config import (
     load_config,
     raw_statusline_passthrough,
+    read_statusline_passthrough,
     strip_comments,
 )
 from tests.helpers import default_config
@@ -122,6 +123,16 @@ def test_statusline_passthrough_survives_an_invalid_config(tmp_path):
     path = write(tmp_path, '{"mdoe": "x", "statusline": {"passthrough": "echo hi"}}')
     assert load_config(path).status == "invalid"
     assert raw_statusline_passthrough(path) == "echo hi"
+
+
+def test_reading_the_passthrough_says_whether_the_file_could_be_read(tmp_path):
+    assert read_statusline_passthrough(tmp_path / "absent.jsonc") == (True, None)
+    assert read_statusline_passthrough(write(tmp_path, "{}")) == (True, None)
+    assert read_statusline_passthrough(
+        write(tmp_path, '{"mdoe": "x", "statusline": {"passthrough": "echo hi"}}')
+    ) == (True, "echo hi")
+    assert read_statusline_passthrough(write(tmp_path, "{not json")) == (False, None)
+    assert read_statusline_passthrough(write(tmp_path, "[]")) == (False, None)
 
 
 def test_statusline_passthrough_absent_or_unreadable(tmp_path):

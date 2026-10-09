@@ -66,6 +66,35 @@ def test_an_unwritable_state_directory_still_relays(paths, tmp_path):
     assert run(STATUS_INPUT, broken, NOW, FakeRunner()) == "relayed"
 
 
+def test_a_config_syntax_error_does_not_blank_the_status_line(paths):
+    with_passthrough(paths)
+    run(STATUS_INPUT, paths, NOW, FakeRunner())
+    paths.config.write_text('{"statusline": {"passthrough": "my-statusline --flag"},}')
+    runner = FakeRunner(stdout="still here")
+    assert run(STATUS_INPUT, paths, NOW, runner) == "still here"
+    assert runner.calls[0][0] == "my-statusline --flag"
+
+
+def test_removing_the_config_stops_the_passthrough(paths):
+    with_passthrough(paths)
+    run(STATUS_INPUT, paths, NOW, FakeRunner())
+    paths.config.unlink()
+    runner = FakeRunner()
+    assert run(STATUS_INPUT, paths, NOW, runner) == ""
+    assert runner.calls == []
+
+
+def test_a_removed_passthrough_stays_removed_through_a_later_syntax_error(paths):
+    with_passthrough(paths)
+    run(STATUS_INPUT, paths, NOW, FakeRunner())
+    paths.config.write_text("{}")
+    run(STATUS_INPUT, paths, NOW, FakeRunner())
+    paths.config.write_text("{not json")
+    runner = FakeRunner()
+    assert run(STATUS_INPUT, paths, NOW, runner) == ""
+    assert runner.calls == []
+
+
 def test_the_passthrough_really_runs(paths):
     with_passthrough(paths, "cat")
     assert run(STATUS_INPUT, paths, NOW) == STATUS_INPUT
