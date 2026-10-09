@@ -10,6 +10,9 @@
 
   // A target is a model you can route to. "weight" decides when it is paused:
   // heavy targets stop at conserve, medium at critical, light at exhausted.
+  // A codex target may also name a Codex model, for example
+  // "model": "gpt-6-astra". Routed Codex runs ignore ~/.codex/config.toml,
+  // so without it Codex uses its built-in default model.
   "targets": {
     "opus":       { "plan": "claude", "model": "opus",   "weight": "heavy"  },
     "sonnet":     { "plan": "claude", "model": "sonnet", "weight": "medium" },

@@ -39,6 +39,15 @@ would do and changes nothing. With an invalid file it does nothing at all;
   `write_redirect_modes`.
 - Inside a Codex run, Claude Code's Bash rules do not apply to the commands
   Codex runs. The Codex sandbox is the boundary.
+- That sandbox does not protect the paths Claude Code guards in every mode,
+  such as `.claude/` and `.mcp.json`. A write redirect could edit them where
+  Claude Code would have asked first. Be deliberate about which modes you
+  list in `write_redirect_modes`.
+- Routed Codex runs ignore `~/.codex/config.toml`, so its plugins and
+  settings do not apply to them. To choose the Codex model, add `"model"` to
+  a Codex target; otherwise Codex uses its built-in default.
+- `router codex-run` is internal. It starts Codex only for a launch the hook
+  redirected, once, within 30 minutes; run by hand it refuses.
 - Codex's quota on disk updates only when Codex runs.
 
 ## Development

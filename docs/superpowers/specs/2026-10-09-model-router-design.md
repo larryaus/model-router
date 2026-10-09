@@ -109,6 +109,11 @@ Rules shared by both readers:
 - Usage only rises within a window, so an old reading is a valid lower bound.
   Readings are never discarded for age.
 - A window whose `resets_at` is in the past counts as 0% used.
+- A window reported with no reset time is given the latest reset it could
+  have, one window-length after capture, so it cannot count forever.
+- A used percentage above 100 is clamped to 100, not dropped.
+- A status-line payload may carry one window without the other. The Claude
+  snapshot keeps the missing window's last reading while its reset is ahead.
 - `known` is false only when no reading exists or the source cannot be parsed.
 
 Readers take their source paths as arguments. They do no other I/O.
@@ -160,10 +165,13 @@ hook response.
   a `deny` permission decision. It builds the `Launch` value from the hook
   input: `permission_mode`, whether `agent_id` is present (a nested launch),
   and `cwd`.
-- `permissions.py`: a helper for `pre_agent.py`. Given `cwd`, it reports
-  whether any `permissions.deny` rule scoped to `Read`, `Edit`, or `Write`
-  exists in the user, project, project-local, or managed Claude Code settings
-  files. It returns `None` if any of those files exists but cannot be parsed.
+- `permissions.py`: a helper for `pre_agent.py`. It reports whether any
+  `permissions.deny` or `permissions.ask` rule for a file tool (`Read`, `Edit`,
+  `Write`, `MultiEdit`, `NotebookEdit`, `Glob`, `Grep`) exists in the user,
+  project, project-local, or managed Claude Code settings files. Project
+  settings are searched upward from both the session's `cwd` and
+  `CLAUDE_PROJECT_DIR`; user settings honour `CLAUDE_CONFIG_DIR`. It returns
+  `None` if any of those files exists but cannot be parsed.
 - `prompt.py`: the `UserPromptSubmit` hook. It injects one line through
   `additionalContext` when a plan's level differs from the level last announced
   in this session.
@@ -178,17 +186,33 @@ file, runs one `codex exec` in the foreground, and returns Codex's final
 message verbatim. Both declare `model: haiku` so the wrapper itself costs
 almost no Claude quota.
 
-The pre-launch hook passes the reasoning effort to the worker as a first line
-of the prompt, `ROUTER_EFFORT: <effort>`, which the worker strips and passes to
-Codex.
+The workers do not build a `codex` command themselves. They call
+`router codex-run read|write <prompt-file>`, and that command starts Codex
+only for a launch the hook redirected:
 
-Each worker fixes its own boundary and does not inherit one from Codex's
+- When the pre-launch hook redirects a launch, it writes a one-time **grant**
+  to the state directory, holding the sandbox mode, reasoning effort, optional
+  model, and the session's working directory. It puts the grant's random nonce
+  on the first line of the worker's prompt, `ROUTER_GRANT: <nonce>`.
+- `codex-run` redeems the grant before starting Codex and deletes it. It
+  refuses to run when there is no grant, the grant was already used, it is
+  older than 30 minutes, or its mode differs from the worker's.
+- The grant decides the sandbox, effort, model, and directory. The prompt text
+  and the worker decide none of them. A worker launched directly, without a
+  redirect, therefore has nothing to run with.
+
+Each run fixes its own boundary and does not inherit one from Codex's
 configuration:
 
+- It passes `--ignore-user-config` and `--ignore-rules`, so plugins, MCP
+  servers, and other settings in the owner's `~/.codex/config.toml` do not
+  apply to a routed task. It also pins
+  `sandbox_workspace_write.network_access=false` and an empty
+  `writable_roots`.
 - It passes `--sandbox` explicitly on every run: `read-only` for `codex-read`,
   `workspace-write` for `codex-write`.
-- It passes `--cd` with the session's working directory, so writes are confined
-  to that workspace.
+- It passes `--cd` with the session's working directory, taken from the grant,
+  so writes are confined to that workspace.
 - It never passes a flag that widens or bypasses the sandbox, and never adds
   extra writable directories.
 - Its `codex exec` call is an ordinary Bash call. It goes through Claude Code's
@@ -275,13 +299,15 @@ would reject.
   3. *Permission mode.* The session's `permission_mode` is listed in
      `read_redirect_modes` if the launch needs `codex-read`, or in
      `write_redirect_modes` if it needs `codex-write`. See the table below.
-  4. *No file-scoped deny rules.* No `Read`, `Edit`, or `Write` deny rule
-     exists in the Claude Code settings that apply to the session. Codex
-     cannot honour per-path rules, so their presence rules out any redirect.
+  4. *No file-scoped rules.* No deny or ask rule for a file tool exists in the
+     Claude Code settings that apply to the session. Codex cannot honour
+     per-path rules, so their presence rules out any redirect.
 
   Anything unknown fails the check: a missing or unrecognised
-  `permission_mode`, or settings that could not be read. A launch that fails
-  any check still receives Claude model changes.
+  `permission_mode`; settings that could not be read; an agent type that is
+  not a non-empty string; a `cwd` that is missing or not absolute. Any
+  `agent_id` value at all marks the launch as nested. A launch that fails any
+  check still receives Claude model changes.
 
   | `permission_mode` | `codex-read` | `codex-write` |
   |---|---|---|
@@ -307,7 +333,7 @@ would reject.
 |---|---|
 | keep | No output. The launch proceeds unchanged. Produced by passthrough, `[route:keep]`, `"mode": "off"`, and an invalid config. |
 | set_model | `model` is set to the target's model. |
-| redirect_codex | `subagent_type` becomes the plugin's `codex-read` or `codex-write`, `model` is removed, and the effort line is prepended to the prompt. |
+| redirect_codex | `subagent_type` becomes the plugin's `codex-read` or `codex-write`, `model` is removed, a grant is written, and its `ROUTER_GRANT:` line is prepended to the prompt. |
 | deny | The launch is denied with the reason. |
 
 In `shadow` mode the decision is computed and logged, and the launch always
@@ -393,6 +419,10 @@ weight; thresholds are ordered `conserve < critical < exhausted`;
 modes and never `plan`; `write_redirect_modes` is a subset of
 `read_redirect_modes`.
 
+A Codex target may also carry an optional `"model"`. Routed Codex runs ignore
+the owner's Codex config, so this is how a specific Codex model is chosen;
+without it Codex uses its built-in default.
+
 `config.py` returns one of three results, matching the table above: a valid
 config, the built-in shadow config, or an invalid marker carrying the list of
 errors. It never returns a partially applied file.
@@ -437,6 +467,11 @@ rename. Files are created with owner-only permissions.
   router does not retry on Claude, so no task is paid for twice silently.
 - **Passthrough status line.** Run with a 2-second timeout. On failure or
   timeout the router prints an empty status line and still saves the snapshot.
+  The last passthrough command read from a parseable config is remembered, and
+  used when the config cannot be parsed, so a typo does not blank the owner's
+  status line.
+- **Codex run without a grant.** `codex-run` refuses and says why. It never
+  starts Codex.
 - **Time budget.** Hooks declare a 5-second timeout. The decision path reads a
   handful of small files and the tail of at most 20 logs.
 
@@ -504,6 +539,11 @@ model-router/
 │  ├─ config.py
 │  ├─ decision_log.py
 │  ├─ state.py
+│  ├─ grants.py
+│  ├─ codex_run.py
+│  ├─ paths.py
+│  ├─ fsutil.py
+│  ├─ entry.py
 │  ├─ cli.py
 │  └─ hooks/{pre_agent,prompt,statusline,permissions}.py
 ├─ config.example.jsonc
@@ -552,6 +592,18 @@ in phases 3 and 6 and are confirmed with the owner at that point.
   deny rules, the `auto` mode's safety checks, and other plugins' hooks do not
   apply to the commands Codex itself runs. The Codex sandbox is the boundary
   there: read-only, or writes confined to the workspace.
+- Codex's workspace-write sandbox protects `.git` and `.codex`, but not the
+  paths Claude Code guards in every mode, such as `.claude/` and `.mcp.json`.
+  A write redirect could therefore edit a project's hooks or permission rules
+  where Claude Code would have asked first. This is not verified on this
+  machine and is not mitigated in code; it is a reason to be deliberate about
+  `write_redirect_modes`.
+- Routed Codex runs ignore `~/.codex/config.toml`, so they do not use the
+  model named there unless the Codex target names one. A project-level Codex
+  config, if a project has one, is not ignored.
+- Hook start-up measures about 100 ms on this machine, at the success
+  criterion's limit and not comfortably under it. What remains is the cost of
+  the standard-library imports every module shares.
 - With the default lists, a session in `default` or `auto` mode never
   redirects a write task to Codex. Those tasks stay on Claude unless the owner
   adds the mode to `write_redirect_modes`.
