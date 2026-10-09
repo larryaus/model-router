@@ -6,7 +6,6 @@ reader never touches Codex credentials; it only reads those log lines.
 
 import json
 import os
-from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
@@ -66,6 +65,8 @@ def _windows(rate_limits: Dict[str, Any]) -> List[Window]:
 def _captured_at(record: Dict[str, Any], fallback: float) -> int:
     raw = record.get("timestamp")
     if isinstance(raw, str):
+        from datetime import datetime  # Only needed once a reading is found.
+
         try:
             return int(datetime.fromisoformat(raw.replace("Z", "+00:00")).timestamp())
         except ValueError:

@@ -1,12 +1,15 @@
 """File helpers shared by every module that writes state."""
 
 import os
-import tempfile
 from pathlib import Path
 
 
 def atomic_write_text(path: Path, text: str) -> None:
     """Write text through a temp file in the same directory, owner-only."""
+    # Imported here because most hook runs never write state, and tempfile
+    # is one of the slower standard-library imports.
+    import tempfile
+
     destination = Path(path)
     destination.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     descriptor, temporary = tempfile.mkstemp(
