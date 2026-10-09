@@ -40,6 +40,18 @@ def effective_used_pct(window: Window, now: int) -> float:
     return window.used_pct
 
 
+def with_expiry(window: Window, captured_at: Optional[int]) -> Window:
+    """Give a window with no reset time the latest reset it could have.
+
+    A window cannot outlive its own length, so a reading taken at
+    `captured_at` has certainly reset one window-length later. Without this,
+    a reading with no reset time would count against the plan forever.
+    """
+    if window.resets_at is not None or captured_at is None:
+        return window
+    return window._replace(resets_at=captured_at + window.window_minutes * 60)
+
+
 def window_label(window: Window) -> str:
     if window.window_minutes == FIVE_HOUR_MINUTES:
         return "5h"

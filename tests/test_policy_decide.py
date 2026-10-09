@@ -92,7 +92,9 @@ def test_override_to_codex_obeys_redirect_eligibility():
 def test_unknown_tag_is_ignored_with_a_note():
     decision = run("plan", override="gpt9")
     assert decision.target == "opus"
-    assert "unknown route tag 'gpt9' ignored" in decision.reason
+    assert "unknown route tag ignored" in decision.reason
+    # The tag's text comes from the prompt, and the reason is logged.
+    assert "gpt9" not in decision.reason
 
 
 @pytest.mark.parametrize("mode,redirects", [

@@ -53,6 +53,14 @@ def test_a_null_window_is_skipped(tmp_path):
     assert read_codex_quota(tmp_path).windows == [Window(14.0, 10080, 1791802257)]
 
 
+def test_a_window_without_a_reset_time_expires_one_window_after_capture(tmp_path):
+    no_reset = {"used_percent": 99.0, "window_minutes": 300}
+    write_rollout(tmp_path, "new", [codex_line(no_reset, S)], mtime=2000)
+    quota = read_codex_quota(tmp_path)
+    assert quota.windows[0] == Window(99.0, 300, quota.captured_at + 300 * 60)
+    assert quota.windows[1] == Window(14.0, 10080, 1791802257)
+
+
 def test_missing_or_empty_directory_is_unknown(tmp_path):
     assert read_codex_quota(tmp_path / "absent") == unknown("codex")
     assert read_codex_quota(tmp_path) == unknown("codex")

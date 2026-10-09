@@ -10,7 +10,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
-from model_router.quota.types import PlanQuota, Window, number, unknown
+from model_router.quota.types import PlanQuota, Window, number, unknown, with_expiry
 
 DEFAULT_MAX_FILES = 20
 DEFAULT_TAIL_BYTES = 256 * 1024
@@ -95,5 +95,7 @@ def read_codex_quota(
                 continue
             windows = _windows(rate_limits)
             if windows:
-                return PlanQuota("codex", windows, _captured_at(record, mtime), True)
+                captured_at = _captured_at(record, mtime)
+                windows = [with_expiry(window, captured_at) for window in windows]
+                return PlanQuota("codex", windows, captured_at, True)
     return unknown("codex")

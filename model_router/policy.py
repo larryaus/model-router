@@ -207,7 +207,9 @@ def decide(
     if override is not None:
         target = config.targets.get(override)
         if target is None:
-            notes.append("unknown route tag %r ignored" % override)
+            # The tag's text came from the prompt. The reason is logged, and
+            # the log never holds prompt text, so the value is left out.
+            notes.append("unknown route tag ignored")
         else:
             # An explicit override ignores conserve and critical, but not
             # exhausted and not redirect eligibility.
