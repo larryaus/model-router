@@ -11,8 +11,7 @@ from model_router.classify import classify
 from model_router.config import PERMISSION_MODES, PLANS, build_config, load_config
 from model_router.decision_log import read_recent
 from model_router.hooks import run_hook
-from model_router.hooks import pre_agent
-from model_router.hooks import statusline
+from model_router.hooks import pre_agent, prompt, statusline
 from model_router.hooks.permissions import has_file_deny_rules, settings_files
 from model_router.paths import Paths, from_env
 from model_router.policy import Launch, decide, plan_level, projected_pct
@@ -120,6 +119,7 @@ def render_log(paths: Paths, count: int) -> str:
 
 _HOOK_HANDLERS = {
     "pre-agent": ("pre_agent", pre_agent.handle),
+    "prompt": ("prompt", prompt.handle),
 }
 
 

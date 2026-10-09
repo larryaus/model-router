@@ -30,3 +30,13 @@ def test_hooks_file_wires_the_pre_launch_hook():
 
 def test_entry_script_is_executable():
     assert os.access(str(ROOT / "bin" / "router"), os.X_OK)
+
+
+def test_hooks_file_wires_the_prompt_hook():
+    entry = load("hooks/hooks.json")["hooks"]["UserPromptSubmit"][0]
+    assert "matcher" not in entry
+    assert entry["hooks"] == [{
+        "type": "command",
+        "command": '"${CLAUDE_PLUGIN_ROOT}"/bin/router hook prompt',
+        "timeout": 5,
+    }]
