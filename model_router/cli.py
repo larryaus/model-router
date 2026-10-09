@@ -2,12 +2,15 @@
 
 import argparse
 import os
+import sys
 import time
 from typing import List
 
 from model_router.classify import classify
 from model_router.config import PERMISSION_MODES, PLANS, build_config, load_config
 from model_router.decision_log import read_recent
+from model_router.hooks import run_hook
+from model_router.hooks import pre_agent
 from model_router.hooks.permissions import has_file_deny_rules, settings_files
 from model_router.paths import Paths, from_env
 from model_router.policy import Launch, decide, plan_level, projected_pct
@@ -113,6 +116,28 @@ def render_log(paths: Paths, count: int) -> str:
     return "\n".join(lines)
 
 
+_HOOK_HANDLERS = {
+    "pre-agent": ("pre_agent", pre_agent.handle),
+}
+
+
+def _run_hook_command(argv: List[str]) -> int:
+    """Run a hook. Always returns 0: exit code 2 would block the launch."""
+    try:
+        entry = _HOOK_HANDLERS.get(argv[0] if argv else "")
+        if entry is None:
+            return 0
+        text = run_hook(
+            entry[0], entry[1], sys.stdin.read(),
+            from_env(os.environ), int(time.time()), os.environ,
+        )
+        if text:
+            sys.stdout.write(text + "\n")
+    except Exception:
+        pass
+    return 0
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="router", description="Model router for Claude Code."
@@ -131,6 +156,8 @@ def _parser() -> argparse.ArgumentParser:
 
 
 def main(argv: List[str]) -> int:
+    if argv[:1] == ["hook"]:
+        return _run_hook_command(argv[1:])
     args = _parser().parse_args(argv)
     paths = from_env(os.environ)
     now = int(time.time())
