@@ -1,0 +1,12 @@
+{
+  "name": "model-router-local",
+  "description": "Local marketplace for the model router plugin.",
+  "owner": { "name": "Larry Zhang" },
+  "plugins": [
+    {
+      "name": "model-router",
+      "source": "./",
+      "description": "Routes subagent launches across a Claude plan and a ChatGPT plan."
+    }
+  ]
+}

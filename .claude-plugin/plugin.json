@@ -1,0 +1,6 @@
+{
+  "name": "model-router",
+  "version": "0.1.0",
+  "description": "Routes subagent launches across a Claude plan and a ChatGPT plan by preference and remaining quota.",
+  "author": { "name": "Larry Zhang" }
+}
