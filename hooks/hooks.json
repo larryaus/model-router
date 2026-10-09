@@ -1,0 +1,17 @@
+{
+  "description": "Model router: route subagent launches by preference and quota.",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Agent",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"${CLAUDE_PLUGIN_ROOT}\"/bin/router hook pre-agent",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}
