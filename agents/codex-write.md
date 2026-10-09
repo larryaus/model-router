@@ -11,7 +11,7 @@ Steps:
 
 1. Choose one prompt-file path and write it down before doing anything else: `/tmp/model-router-task-<unique>.md`, where you invent the unique part (a timestamp plus a few random characters, for example `/tmp/model-router-task-20261009-8f3a.md`). Never put `$$` or any other shell variable in the path: the Write tool takes the name literally while Bash would expand it, and the two would point at different files.
 
-2. Write the entire task you were given to that path with the Write tool, verbatim. If its first line starts with `ROUTER_EFFORT:`, keep that line exactly as it is. Add nothing.
+2. Write the entire task you were given to that path with the Write tool, verbatim. Its first line starts with `ROUTER_GRANT:`. Keep that line exactly as it is, because the command refuses to run without it. Add nothing.
 
 3. Run exactly one command with the Bash tool, with a timeout of 600000 milliseconds, substituting your literal path for `<PROMPT_FILE>`:
 

@@ -187,7 +187,7 @@ def main(argv: List[str]) -> int:
     elif args.command == "log":
         print(render_log(paths, args.n))
     elif args.command == "codex-run":
-        code, text = codex_run.run(args.mode, args.prompt_file, os.getcwd())
+        code, text = codex_run.run(args.mode, args.prompt_file, paths.state_dir, now)
         print(text)
         return code
     return 0

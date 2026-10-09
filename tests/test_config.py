@@ -100,6 +100,24 @@ def test_invalid_config_is_inert(tmp_path, text, fragment):
     assert any(fragment in error for error in result.errors), result.errors
 
 
+def test_a_codex_target_may_name_a_model(tmp_path):
+    result = load_config(write(tmp_path, """{
+      "targets": {"codex-deep": {"plan": "codex", "effort": "xhigh",
+                                 "weight": "heavy", "model": "gpt-6-astra"}}
+    }"""))
+    assert result.status == "valid"
+    assert result.config.targets["codex-deep"].model == "gpt-6-astra"
+    assert result.config.targets["codex"].model is None
+
+
+@pytest.mark.parametrize("model", ['"two words"', '"--sandbox"', "7", '""'])
+def test_a_codex_model_name_is_checked(tmp_path, model):
+    text = '{"targets": {"x": {"plan": "codex", "effort": "low", "weight": "light", "model": %s}}}' % model
+    result = load_config(write(tmp_path, text))
+    assert result.status == "invalid"
+    assert any("targets.x.model" in error for error in result.errors), result.errors
+
+
 def test_statusline_passthrough_survives_an_invalid_config(tmp_path):
     path = write(tmp_path, '{"mdoe": "x", "statusline": {"passthrough": "echo hi"}}')
     assert load_config(path).status == "invalid"

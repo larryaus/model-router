@@ -3,6 +3,7 @@
 import os
 from typing import Any, Dict, List, Mapping, Optional
 
+from model_router import grants
 from model_router.classify import classify
 from model_router.config import Config, load_config
 from model_router.decision_log import append_record
@@ -26,7 +27,12 @@ def _output(fields: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def build_response(
-    decision: Decision, tool_input: Dict[str, Any], config: Config
+    decision: Decision,
+    tool_input: Dict[str, Any],
+    config: Config,
+    paths: Paths,
+    now: int,
+    cwd: Any,
 ) -> Optional[Dict[str, Any]]:
     if decision.action == "keep":
         return None
@@ -44,11 +50,25 @@ def build_response(
             return None
         updated["model"] = target.model
     else:
+        if not isinstance(cwd, str) or not os.path.isabs(cwd):
+            # Eligibility already requires a usable cwd; never redirect without one.
+            return None
         prompt = tool_input.get("prompt")
+        # The grant is what lets the worker start Codex, and it fixes the
+        # sandbox, effort, model, and directory. The prompt only carries the
+        # nonce that redeems it.
+        nonce = grants.issue(
+            paths.state_dir,
+            "write" if decision.worker == "codex-write" else "read",
+            target.effort,
+            target.model,
+            cwd,
+            now,
+        )
         updated["subagent_type"] = WORKER_PREFIX + decision.worker
         updated.pop("model", None)
-        updated["prompt"] = "ROUTER_EFFORT: %s\n%s" % (
-            target.effort, prompt if isinstance(prompt, str) else "",
+        updated["prompt"] = "ROUTER_GRANT: %s\n%s" % (
+            nonce, prompt if isinstance(prompt, str) else "",
         )
     return _output({
         "permissionDecision": "allow",
@@ -143,4 +163,4 @@ def handle(
     })
     if config.mode != "enforce":
         return None
-    return build_response(decision, tool_input, config)
+    return build_response(decision, tool_input, config, paths, now, cwd)

@@ -2,51 +2,62 @@
 
 The worker agents call this instead of building a codex command themselves,
 so the sandbox, working directory, and flags are decided by code that is
-tested, not by a model following instructions.
+tested, not by a model following instructions. It starts Codex only for a
+launch the pre-launch hook redirected: see `grants`.
 """
 
 import os
 import subprocess
 import tempfile
-from typing import Any, Callable, List, Tuple
+from pathlib import Path
+from typing import Any, Callable, List, Optional, Tuple
 
-from model_router.config import CODEX_EFFORTS
+from model_router import grants
 
 SANDBOX = {"read": "read-only", "write": "workspace-write"}
-EFFORT_PREFIX = "ROUTER_EFFORT:"
-DEFAULT_EFFORT = "medium"
+GRANT_PREFIX = "ROUTER_GRANT:"
 ERROR_TAIL_CHARS = 2000
+NO_GRANT = (
+    "codex-run: no valid router grant. This command runs only for a launch "
+    "the model router redirected, once, shortly after the redirect."
+)
 
 
-def split_effort(text: str) -> Tuple[str, str]:
-    """Take the effort line off the front of a task.
-
-    The effort is untrusted text, so anything outside the known list is
-    replaced with the default before it can reach a command line.
-    """
+def split_grant(text: str) -> Tuple[Optional[str], str]:
+    """Take the grant line off the front of a task: (nonce, remaining task)."""
     first, _newline, rest = text.partition("\n")
-    if not first.startswith(EFFORT_PREFIX):
-        return DEFAULT_EFFORT, text
-    effort = first[len(EFFORT_PREFIX):].strip()
-    return (effort if effort in CODEX_EFFORTS else DEFAULT_EFFORT), rest
+    if not first.startswith(GRANT_PREFIX):
+        return None, text
+    return first[len(GRANT_PREFIX):].strip(), rest
 
 
-def build_command(mode: str, effort: str, cwd: str, out_file: str) -> List[str]:
-    return [
+def build_command(
+    mode: str, effort: str, cwd: str, out_file: str, model: Optional[str] = None
+) -> List[str]:
+    command = [
         "codex", "exec",
+        # The owner's Codex config can enable plugins, extra writable roots,
+        # and network access. A routed task gets none of that: the boundary
+        # is set here and nowhere else.
+        "--ignore-user-config",
+        "--ignore-rules",
         "--sandbox", SANDBOX[mode],
+        "-c", "sandbox_workspace_write.network_access=false",
+        "-c", "sandbox_workspace_write.writable_roots=[]",
         "--cd", cwd,
         "--skip-git-repo-check",
         "-c", 'model_reasoning_effort="%s"' % effort,
-        "--output-last-message", out_file,
-        "-",
     ]
+    if model:
+        command += ["--model", model]
+    return command + ["--output-last-message", out_file, "-"]
 
 
 def run(
     mode: str,
     prompt_file: str,
-    cwd: str,
+    state_dir: Path,
+    now: int,
     runner: Callable[..., Any] = subprocess.run,
 ) -> Tuple[int, str]:
     if mode not in SANDBOX:
@@ -54,9 +65,17 @@ def run(
     try:
         with open(prompt_file, "r", encoding="utf-8") as handle:
             text = handle.read()
-    except OSError as exc:
+    except (OSError, ValueError) as exc:
         return 2, "codex-run: could not read the prompt file: %s" % exc
-    effort, task = split_effort(text)
+
+    nonce, task = split_grant(text)
+    grant = grants.redeem(state_dir, nonce, now)
+    if grant is None:
+        return 2, NO_GRANT
+    if grant["mode"] != mode:
+        return 2, "codex-run: this grant is for a %s run, not a %s run" % (
+            grant["mode"], mode,
+        )
     if not task.strip():
         return 2, "codex-run: the task is empty"
 
@@ -65,7 +84,9 @@ def run(
     try:
         try:
             completed = runner(
-                build_command(mode, effort, cwd, out_file),
+                # Everything that shapes the run comes from the grant the hook
+                # wrote, never from the prompt text.
+                build_command(mode, grant["effort"], grant["cwd"], out_file, grant["model"]),
                 input=task,
                 capture_output=True,
                 text=True,

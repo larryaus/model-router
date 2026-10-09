@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+from model_router import codex_run, grants
 from model_router.decision_log import read_recent
 from model_router.hooks import run_hook
 from model_router.hooks.pre_agent import handle
@@ -80,8 +81,62 @@ def test_enforce_redirects_to_the_codex_worker(paths):
     updated = output(handle(request, paths, NOW, {}))["updatedInput"]
     assert updated["subagent_type"] == "model-router:codex-write"
     assert "model" not in updated
-    assert updated["prompt"] == "ROUTER_EFFORT: xhigh\nImplement the cache layer"
+    header, _newline, rest = updated["prompt"].partition("\n")
+    assert rest == "Implement the cache layer"
+    assert header.startswith("ROUTER_GRANT: ")
+    grant = grants.redeem(paths.state_dir, header[len("ROUTER_GRANT: "):], NOW)
+    assert grant == {
+        "mode": "write", "effort": "xhigh", "model": None,
+        "cwd": "/nonexistent-project", "issued_at": NOW,
+    }
     assert updated["description"] == "Implement the cache"
+
+
+def test_a_read_redirect_gets_a_read_grant(paths):
+    enforce(paths)
+    request = payload(description="Review the cache", prompt="Review the cache layer")
+    updated = output(handle(request, paths, NOW, {}))["updatedInput"]
+    assert updated["subagent_type"] == "model-router:codex-read"
+    nonce = updated["prompt"].partition("\n")[0][len("ROUTER_GRANT: "):]
+    assert grants.redeem(paths.state_dir, nonce, NOW)["mode"] == "read"
+
+
+def test_shadow_mode_issues_no_grant(paths):
+    paths.config.write_text("{}")
+    assert handle(payload(), paths, NOW, {}) is None
+    assert not (paths.state_dir / "grants").exists()
+
+
+def test_a_redirect_runs_once_with_its_grant_and_never_again(paths, tmp_path):
+    enforce(paths)
+    updated = output(handle(payload(), paths, NOW, {}))["updatedInput"]
+    prompt_path = tmp_path / "task.md"
+    prompt_path.write_text(updated["prompt"])
+
+    calls = []
+
+    def fake_codex(command, **kwargs):
+        calls.append(command)
+        out_file = command[command.index("--output-last-message") + 1]
+        Path(out_file).write_text("done")
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    first = codex_run.run("write", str(prompt_path), paths.state_dir, NOW + 1, fake_codex)
+    assert first == (0, "done")
+    assert calls[0][calls[0].index("--sandbox") + 1] == "workspace-write"
+    assert calls[0][calls[0].index("--cd") + 1] == "/nonexistent-project"
+    second = codex_run.run("write", str(prompt_path), paths.state_dir, NOW + 2, fake_codex)
+    assert second[0] == 2 and len(calls) == 1
+
+
+def test_a_worker_launched_directly_has_no_grant_to_run_with(paths, tmp_path):
+    enforce(paths)
+    direct = payload(subagent_type="model-router:codex-write", mode="plan")
+    assert handle(direct, paths, NOW, {}) is None
+    prompt_path = tmp_path / "task.md"
+    prompt_path.write_text(direct["tool_input"]["prompt"])
+    code, text = codex_run.run("write", str(prompt_path), paths.state_dir, NOW, None)
+    assert code == 2 and "no valid router grant" in text
 
 
 def test_enforce_denies_when_everything_is_exhausted(paths):

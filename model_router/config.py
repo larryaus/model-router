@@ -9,6 +9,7 @@ The loader has exactly three outcomes, and never a partial one:
 """
 
 import json
+import re
 from pathlib import Path
 from typing import Any, Dict, List, NamedTuple, Optional, Tuple
 
@@ -20,6 +21,8 @@ PLANS = ("claude", "codex")
 WEIGHTS = ("light", "medium", "heavy")
 CLAUDE_MODELS = ("opus", "sonnet", "haiku", "fable")
 CODEX_EFFORTS = ("minimal", "low", "medium", "high", "xhigh")
+# A Codex model name ends up as a command-line argument, so its shape is fixed.
+MODEL_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 PERMISSION_MODES = (
     "default", "plan", "acceptEdits", "auto", "dontAsk", "bypassPermissions",
 )
@@ -203,10 +206,19 @@ def _targets(value: Any, errors: List[str]) -> Dict[str, Target]:
             errors.append(
                 "%s.effort: expected one of %s" % (path, ", ".join(CODEX_EFFORTS))
             )
+        # Optional on a Codex target. Routed Codex runs ignore the owner's
+        # Codex config, so this is how a specific Codex model is chosen.
+        if plan == "codex" and model is not None and not (
+            isinstance(model, str) and MODEL_NAME.match(model)
+        ):
+            errors.append(
+                "%s.model: expected a model name made of letters, digits, "
+                "dots, dashes, and underscores" % path
+            )
         targets[name] = Target(
             name,
             plan,
-            model if plan == "claude" else None,
+            model if plan in PLANS else None,
             effort if plan == "codex" else None,
             weight,
         )
