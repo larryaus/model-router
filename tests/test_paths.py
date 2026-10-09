@@ -22,3 +22,8 @@ def test_environment_overrides(tmp_path):
     })
     assert paths.config == Path("/elsewhere/config.jsonc")
     assert paths.log == Path("/elsewhere/state/decisions.jsonl")
+
+
+def test_claude_config_dir_is_honoured(tmp_path):
+    paths = from_env({"HOME": str(tmp_path), "CLAUDE_CONFIG_DIR": "/elsewhere/claude"})
+    assert paths.claude_home == Path("/elsewhere/claude")

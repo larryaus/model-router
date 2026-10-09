@@ -1,5 +1,6 @@
 """PreToolUse adapter for the Agent tool: route a subagent launch."""
 
+import os
 from typing import Any, Dict, List, Mapping, Optional
 
 from model_router.classify import classify
@@ -14,6 +15,9 @@ from model_router.state import load_state, save_state, session_entry
 WORKER_PREFIX = "model-router:"
 REASON_PREFIX = "Model router: "
 DEFAULT_AGENT_TYPE = "general-purpose"
+# Stands in for an agent type that is not a usable string. It is in no
+# config list, so it can receive Claude model changes but never a redirect.
+INVALID_AGENT_TYPE = "<invalid>"
 
 
 def _output(fields: Dict[str, Any]) -> Dict[str, Any]:
@@ -92,20 +96,30 @@ def handle(
     if config.mode == "off":
         return None
 
-    agent_type = tool_input.get("subagent_type")
+    # Anything unknown must block a redirect, never pass by default. Only a
+    # launch that names no agent type at all is the general-purpose agent.
+    agent_type = tool_input.get("subagent_type", DEFAULT_AGENT_TYPE)
     if not isinstance(agent_type, str) or not agent_type:
-        agent_type = DEFAULT_AGENT_TYPE
+        agent_type = INVALID_AGENT_TYPE
     permission_mode = payload.get("permission_mode")
     cwd = payload.get("cwd")
+    if isinstance(cwd, str) and os.path.isabs(cwd):
+        project_dir = env.get("CLAUDE_PROJECT_DIR") or ""
+        file_deny_rules = has_file_deny_rules(settings_files(
+            cwd,
+            paths.claude_home,
+            paths.managed_settings,
+            project_dir if os.path.isabs(project_dir) else "",
+        ))
+    else:
+        # Without the session's directory the project settings cannot be
+        # found, so whether they hold file rules is unknown.
+        file_deny_rules = None
     launch = Launch(
         agent_type=agent_type,
         permission_mode=permission_mode if isinstance(permission_mode, str) else None,
-        nested=bool(payload.get("agent_id")),
-        file_deny_rules=has_file_deny_rules(settings_files(
-            cwd if isinstance(cwd, str) else "",
-            paths.claude_home,
-            paths.managed_settings,
-        )),
+        nested=payload.get("agent_id") is not None,
+        file_deny_rules=file_deny_rules,
     )
     classification = classify(tool_input, config)
     decision = decide(classification, launch, read_quotas(paths), config, now)

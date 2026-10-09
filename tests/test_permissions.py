@@ -54,3 +54,39 @@ def test_one_unreadable_file_decides_the_result(tmp_path):
     good = write(tmp_path / "good.json", {"permissions": {"deny": []}})
     bad = write(tmp_path / "bad.json", "{not json")
     assert has_file_deny_rules([good, bad]) is None
+
+
+def test_settings_files_also_walk_up_from_the_project_directory(tmp_path):
+    files = settings_files(
+        str(tmp_path / "other"),
+        tmp_path / ".claude",
+        tmp_path / "managed.json",
+        str(tmp_path / "work" / "repo"),
+    )
+    assert tmp_path / "work" / "repo" / ".claude" / "settings.json" in files
+    assert tmp_path / "work" / ".claude" / "settings.local.json" in files
+    assert tmp_path / "other" / ".claude" / "settings.json" in files
+    assert len(files) == len(set(files))
+
+
+@pytest.mark.parametrize(
+    "rule", ["MultiEdit(src/**)", "NotebookEdit", "Glob(secrets/**)", "Grep(secrets/**)"]
+)
+def test_other_file_tools_count(tmp_path, rule):
+    path = write(tmp_path / "s.json", {"permissions": {"deny": [rule]}})
+    assert has_file_deny_rules([path]) is True
+
+
+def test_a_file_scoped_ask_rule_counts(tmp_path):
+    path = write(tmp_path / "s.json", {"permissions": {"ask": ["Edit(infra/**)"]}})
+    assert has_file_deny_rules([path]) is True
+
+
+def test_a_bash_only_ask_rule_does_not_count(tmp_path):
+    path = write(tmp_path / "s.json", {"permissions": {"ask": ["Bash(make deploy:*)"]}})
+    assert has_file_deny_rules([path]) is False
+
+
+def test_a_malformed_ask_list_returns_none(tmp_path):
+    path = write(tmp_path / "s.json", {"permissions": {"ask": "Edit"}})
+    assert has_file_deny_rules([path]) is None

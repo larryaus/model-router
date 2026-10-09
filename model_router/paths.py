@@ -39,6 +39,7 @@ def from_env(env: Mapping[str, str]) -> Paths:
             or home / "Library/Caches/model-router"
         ),
         codex_sessions=home / ".codex/sessions",
-        claude_home=home / ".claude",
+        # Claude Code keeps its user settings here when this is set.
+        claude_home=Path(env.get("CLAUDE_CONFIG_DIR") or home / ".claude"),
         managed_settings=Path(MANAGED_SETTINGS),
     )

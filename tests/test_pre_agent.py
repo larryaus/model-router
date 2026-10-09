@@ -220,3 +220,53 @@ def test_entry_script_is_silent_in_shadow_mode(tmp_path):
     assert (result.returncode, result.stdout) == (0, "")
     log = tmp_path / "Library/Caches/model-router/decisions.jsonl"
     assert json.loads(log.read_text().splitlines()[0])["mode"] == "shadow"
+
+
+@pytest.mark.parametrize("bad_type", [["Explore"], 7, "", None])
+def test_a_malformed_agent_type_is_never_redirected(paths, bad_type):
+    enforce(paths)
+    request = payload()
+    request["tool_input"]["subagent_type"] = bad_type
+    updated = output(handle(request, paths, NOW, {}))["updatedInput"]
+    assert updated["subagent_type"] == bad_type
+    assert updated["model"] == "sonnet"
+    assert read_recent(paths.log, 1)[0]["action"] == "set_model"
+
+
+def test_a_missing_agent_type_means_general_purpose(paths):
+    enforce(paths)
+    request = payload()
+    del request["tool_input"]["subagent_type"]
+    updated = output(handle(request, paths, NOW, {}))["updatedInput"]
+    assert updated["subagent_type"] == "model-router:codex-write"
+    assert read_recent(paths.log, 1)[0]["agent_type"] == "general-purpose"
+
+
+@pytest.mark.parametrize("cwd", [None, ["x"], "relative/path", ""])
+def test_an_unusable_cwd_blocks_the_redirect(paths, cwd):
+    enforce(paths)
+    result = output(handle(payload(cwd=cwd), paths, NOW, {}))
+    assert result["updatedInput"]["model"] == "sonnet"
+    assert result["updatedInput"]["subagent_type"] == "general-purpose"
+    assert read_recent(paths.log, 1)[0]["deny_rules"] is None
+
+
+@pytest.mark.parametrize("agent_id", ["", 0, "agent-1"])
+def test_any_agent_id_marks_the_launch_as_nested(paths, agent_id):
+    enforce(paths)
+    result = output(handle(payload(agent_id=agent_id), paths, NOW, {}))
+    assert result["updatedInput"]["subagent_type"] == "general-purpose"
+    assert read_recent(paths.log, 1)[0]["nested"] is True
+
+
+def test_deny_rules_in_the_project_directory_are_seen_from_elsewhere(paths, tmp_path):
+    enforce(paths)
+    project = tmp_path / "project"
+    (project / ".claude").mkdir(parents=True)
+    (project / ".claude" / "settings.json").write_text(
+        '{"permissions": {"deny": ["Read(./.env)"]}}'
+    )
+    env = {"CLAUDE_PROJECT_DIR": str(project)}
+    result = output(handle(payload(cwd="/nonexistent-project"), paths, NOW, env))
+    assert result["updatedInput"]["model"] == "sonnet"
+    assert read_recent(paths.log, 1)[0]["deny_rules"] is True
