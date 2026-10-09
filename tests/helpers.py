@@ -68,3 +68,19 @@ def default_config(**overrides):
     config, errors = build_config(overrides)
     assert config is not None, errors
     return config
+
+
+from model_router.quota.types import PlanQuota, Window
+
+
+def window(used, minutes=300, elapsed=0.1):
+    return Window(float(used), minutes, _reset(NOW, minutes, elapsed))
+
+
+def quota(plan, five=0, week=0, five_elapsed=0.1, week_elapsed=0.1):
+    return PlanQuota(
+        plan,
+        [window(five, 300, five_elapsed), window(week, 10080, week_elapsed)],
+        NOW,
+        True,
+    )
