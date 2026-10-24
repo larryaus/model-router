@@ -2,6 +2,7 @@ import pytest
 
 from model_router.policy import (
     plan_level,
+    plan_levels,
     projected_pct,
     weekly_projection,
     window_level,
@@ -58,6 +59,11 @@ def test_plan_level_is_the_worst_window():
 
 def test_unknown_quota_is_normal():
     assert plan_level(unknown("codex"), NOW, CONFIG) == "normal"
+
+
+def test_plan_levels_covers_every_plan_even_without_a_reading():
+    levels = plan_levels({"claude": quota("claude", five=92)}, NOW, CONFIG)
+    assert levels == {"claude": "critical", "codex": "normal"}
 
 
 def test_weekly_projection_uses_the_weekly_window_only():
