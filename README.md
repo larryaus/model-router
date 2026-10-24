@@ -30,6 +30,26 @@ would do and changes nothing. With an invalid file it does nothing at all;
 - `MODEL_ROUTER=off` in the environment: off for that session.
 - `"mode": "shadow"` or `"off"` in the config: off everywhere.
 
+## Verification
+
+Set `verify.command` in the config, for example `"python -m pytest -q"`,
+and the router checks each routed write task (by default `implement` and
+`debug`) once it ends. The command runs in the background in the session's
+directory, so it never holds up the session. Exit 0 is a pass, any other
+exit a fail, and a timeout or a command the shell cannot run is unknown.
+
+The result, and what the router would do next, is logged as an `outcome`
+record: `pass`, `retry` the same target, `escalate` to the next heavier
+target allowed at the current quota levels, or `human` when none is left.
+This step only records. Nothing is retried, and no launch or answer is
+changed, in any mode. `bin/router log` shows these records as
+`verify pass`, `verify fail`, or `verify unknown`.
+
+In shadow mode the logged target is the one the router would have used,
+and `resolved_model` is the model that actually ran. Tests run on the
+working tree as it is when the task ends, so other work in progress can
+affect the result.
+
 ## Architecture
 
 The router is three thin hook adapters around a decision core of pure
@@ -108,9 +128,9 @@ decisions: it only saves the quota reading that the next decision will use.
 | Part | Files | Job |
 |---|---|---|
 | Entry | `bin/router`, `entry.py` | Sends hooks and the status line straight to their handlers, loading as little as possible. Everything else goes to `cli.py`. |
-| Hook adapters | `hooks/pre_agent.py`, `hooks/prompt.py`, `hooks/statusline.py` | Read the hook input, call the core, print the hook response. Any failure prints nothing, so the launch proceeds untouched. |
+| Hook adapters | `hooks/pre_agent.py`, `hooks/prompt.py`, `hooks/statusline.py`, `hooks/post_agent.py` | Read the hook input, call the core, print the hook response. Any failure prints nothing, so the launch proceeds untouched. `post_agent` runs in the background and only logs. |
 | Inputs | `config.py`, `quota/`, `hooks/permissions.py` | The config (valid, absent, or invalid), both plans' usage windows, and whether file-scoped deny or ask rules exist. |
-| Decision core | `classify.py`, `policy.py` | Name the task's category, set each plan's level, check redirect eligibility, and pick a target. No I/O. |
+| Decision core | `classify.py`, `policy.py`, `outcome.py` | Name the task's category, set each plan's level, check redirect eligibility, and pick a target; after a verified launch, pick what comes next. No I/O. |
 | Codex path | `grants.py`, `codex_run.py`, `agents/` | Carry a redirected task to Codex inside a sandbox the hook fixed. |
 | Records | `decision_log.py`, `state.py` | One log line per decision, and what each session has already been told. |
 
@@ -202,6 +222,10 @@ Claude and only its model can change.
 - Routed Codex runs ignore `~/.codex/config.toml`, so its plugins and
   settings do not apply to them. To choose the Codex model, add `"model"` to
   a Codex target; otherwise Codex uses its built-in default.
+- `verify.command` runs from a hook, so Claude Code's permission prompts
+  and Bash rules do not apply to it. It runs in every project where a
+  routed write task ends, and a test suite runs that project's code. Set it
+  only if you would let every such project run that command.
 - `router codex-run` is internal. It starts Codex only for a launch the hook
   redirected, once, within 30 minutes; run by hand it refuses.
 - Codex's quota on disk updates only when Codex runs.

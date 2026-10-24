@@ -26,6 +26,9 @@ MODEL_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 PERMISSION_MODES = (
     "default", "plan", "acceptEdits", "auto", "dontAsk", "bypassPermissions",
 )
+# Claude Code does not time out a hook that runs in the background, so the
+# verify command's own limit is the only one. Keep it bounded.
+MAX_VERIFY_SECONDS = 3600
 
 DEFAULTS: Dict[str, Any] = {
     "mode": "shadow",
@@ -65,11 +68,17 @@ DEFAULTS: Dict[str, Any] = {
     "read_redirect_modes": ["default", "auto", "acceptEdits", "bypassPermissions"],
     "write_redirect_modes": ["acceptEdits", "bypassPermissions"],
     "statusline": {"passthrough": None},
+    "verify": {
+        "command": None,
+        "categories": ["implement", "debug"],
+        "timeout": 300,
+        "retry_same": 1,
+    },
 }
 
 _MERGED_KEYS = (
     "targets", "preferences", "thresholds", "projection", "balance",
-    "agent_categories", "keywords", "statusline",
+    "agent_categories", "keywords", "statusline", "verify",
 )
 
 
@@ -100,6 +109,10 @@ class Config(NamedTuple):
     read_redirect_modes: List[str]
     write_redirect_modes: List[str]
     statusline_passthrough: Optional[str]
+    verify_command: Optional[str]
+    verify_categories: List[str]
+    verify_timeout: float
+    verify_retry_same: int
 
 
 class ConfigResult(NamedTuple):
@@ -330,6 +343,27 @@ def build_config(raw: Any) -> Tuple[Optional[Config], List[str]]:
     ):
         errors.append("statusline.passthrough: expected null or a non-empty string")
 
+    verify = _fixed_dict(
+        data["verify"], "verify", ("command", "categories", "timeout", "retry_same"),
+        errors,
+    )
+    verify_command = verify.get("command")
+    if verify_command is not None and not (
+        isinstance(verify_command, str) and verify_command
+    ):
+        errors.append("verify.command: expected null or a non-empty string")
+    verify_categories = _str_list(
+        verify.get("categories", []), "verify.categories", errors, allowed=CATEGORIES
+    )
+    verify_timeout = verify.get("timeout")
+    if not _is_number(verify_timeout) or not 0 < verify_timeout <= MAX_VERIFY_SECONDS:
+        errors.append(
+            "verify.timeout: expected seconds above 0 and at most %d" % MAX_VERIFY_SECONDS
+        )
+    retry_same = verify.get("retry_same")
+    if not isinstance(retry_same, int) or isinstance(retry_same, bool) or retry_same < 0:
+        errors.append("verify.retry_same: expected a whole number, 0 or more")
+
     if errors:
         return None, errors
     return (
@@ -352,6 +386,10 @@ def build_config(raw: Any) -> Tuple[Optional[Config], List[str]]:
             read_redirect_modes=read_modes,
             write_redirect_modes=write_modes,
             statusline_passthrough=passthrough_command,
+            verify_command=verify_command,
+            verify_categories=verify_categories,
+            verify_timeout=verify_timeout,
+            verify_retry_same=retry_same,
         ),
         [],
     )

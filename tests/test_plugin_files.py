@@ -28,6 +28,16 @@ def test_hooks_file_wires_the_pre_launch_hook():
     }]
 
 
+def test_hooks_file_wires_the_post_launch_hook_in_the_background():
+    entry = load("hooks/hooks.json")["hooks"]["PostToolUse"][0]
+    assert entry["matcher"] == "Agent"
+    assert entry["hooks"] == [{
+        "type": "command",
+        "command": '"${CLAUDE_PLUGIN_ROOT}"/bin/router hook post-agent',
+        "async": True,
+    }]
+
+
 def test_entry_script_is_executable():
     assert os.access(str(ROOT / "bin" / "router"), os.X_OK)
 

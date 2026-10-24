@@ -112,6 +112,11 @@ def render_log(paths: Paths, count: int) -> str:
                 when, record["action"], record.get("target") or "-",
                 record.get("reason", ""),
             ))
+        elif record.get("event") == "outcome":
+            lines.append("%s  %-14s %-11s %s" % (
+                when, "verify " + str(record.get("verify")),
+                record.get("target") or "-", record.get("reason", ""),
+            ))
         else:
             detail = record.get("error") or "; ".join(record.get("errors", []))
             lines.append("%s  %-14s %s" % (when, record.get("event", "?"), detail))

@@ -62,5 +62,16 @@
   "write_redirect_modes": ["acceptEdits", "bypassPermissions"],
 
   // A command to run after the status line captures quota, or null.
-  "statusline": { "passthrough": null }
+  "statusline": { "passthrough": null },
+
+  // Check a routed write task once it ends. The command runs in the session's
+  // directory in the background; exit 0 is a pass, any other exit a fail.
+  // Each result, and what the router would do next, goes to the decision
+  // log. Nothing is retried or changed yet. null turns this off.
+  "verify": {
+    "command": null,            // for example "python -m pytest -q"
+    "categories": ["implement", "debug"],
+    "timeout": 300,             // seconds; a timeout counts as unknown
+    "retry_same": 1             // extra tries on one target before a heavier one
+  }
 }

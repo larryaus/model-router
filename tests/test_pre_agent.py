@@ -203,8 +203,14 @@ def test_the_record_has_audit_fields_and_no_prompt_text(paths):
     assert record["permission_mode"] == "acceptEdits"
     assert record["nested"] is False and record["deny_rules"] is False
     assert record["session_id"] == "s1" and record["ts"] == NOW
+    assert record["tool_use_id"] is None
     raw = paths.log.read_text()
     assert "SECRET-TOKEN-123" not in raw and "SECRET-DESC" not in raw
+
+
+def test_the_record_carries_the_tool_use_id(paths):
+    handle(payload(tool_use_id="toolu_9"), paths, NOW, {})
+    assert read_recent(paths.log, 1)[0]["tool_use_id"] == "toolu_9"
 
 
 def test_a_nested_launch_is_not_redirected(paths):

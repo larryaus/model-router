@@ -19,6 +19,8 @@ def _hook(argv: List[str]) -> int:
         name = argv[0] if argv else ""
         if name == "pre-agent":
             from model_router.hooks.pre_agent import handle
+        elif name == "post-agent":
+            from model_router.hooks.post_agent import handle
         elif name == "prompt":
             from model_router.hooks.prompt import handle
         else:
