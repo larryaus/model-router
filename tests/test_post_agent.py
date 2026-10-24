@@ -90,6 +90,18 @@ def test_the_hook_never_responds_even_in_enforce_mode(paths, tmp_path):
     launch(paths, tmp_path)
     assert finish(paths, tmp_path) is None
     assert outcomes(paths)[0]["outcome"] == "retry"
+    assert outcomes(paths)[0]["mode"] == "enforce"
+
+
+def test_the_mode_logged_is_the_one_the_launch_was_routed_in(paths, tmp_path):
+    # A shadow launch did not run its target, even if enforce is on by its end.
+    configure(paths, command="false")
+    launch(paths, tmp_path)
+    paths.config.write_text(json.dumps(
+        {"mode": "enforce", "verify": {"command": "false"}}
+    ))
+    finish(paths, tmp_path)
+    assert outcomes(paths)[0]["mode"] == "shadow"
 
 
 def test_a_command_that_cannot_run_is_logged_as_unknown(paths, tmp_path):

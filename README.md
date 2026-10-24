@@ -12,6 +12,10 @@ Design: `docs/superpowers/specs/2026-10-09-model-router-design.md`
     bin/router status               quota, level per plan, config state
     bin/router explain "<task>"     dry-run a decision
     bin/router log -n 20            recent decisions and why
+    bin/router stats [--days 7]     routing and verified results, summarized
+
+The decision log keeps its live file and five rotated ones, at most about
+30 MB in all. `stats` reads all six; `log` reads the live file.
 
 ## Configuration
 
@@ -43,10 +47,13 @@ record: `pass`, `retry` the same target, `escalate` to the next heavier
 target allowed at the current quota levels, or `human` when none is left.
 This step only records. Nothing is retried, and no launch or answer is
 changed, in any mode. `bin/router log` shows these records as
-`verify pass`, `verify fail`, or `verify unknown`.
+`verify pass`, `verify fail`, or `verify unknown`, and `bin/router stats`
+gives the pass rate and median task time for each category and model, and
+how often each next step would have been taken.
 
 In shadow mode the logged target is the one the router would have used,
-and `resolved_model` is the model that actually ran. Tests run on the
+and `resolved_model` is the model that actually ran; `stats` counts the
+model that ran, marked `*`. Tests run on the
 working tree as it is when the task ends, so other work in progress can
 affect the result.
 
@@ -132,7 +139,7 @@ decisions: it only saves the quota reading that the next decision will use.
 | Inputs | `config.py`, `quota/`, `hooks/permissions.py` | The config (valid, absent, or invalid), both plans' usage windows, and whether file-scoped deny or ask rules exist. |
 | Decision core | `classify.py`, `policy.py`, `outcome.py` | Name the task's category, set each plan's level, check redirect eligibility, and pick a target; after a verified launch, pick what comes next. No I/O. |
 | Codex path | `grants.py`, `codex_run.py`, `agents/` | Carry a redirected task to Codex inside a sandbox the hook fixed. |
-| Records | `decision_log.py`, `state.py` | One log line per decision, and what each session has already been told. |
+| Records | `decision_log.py`, `state.py`, `stats.py` | One log line per decision or verified result, what each session has already been told, and the summary `router stats` prints. |
 
 ### How one launch is routed
 

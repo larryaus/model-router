@@ -1,6 +1,8 @@
 import subprocess
 from pathlib import Path
 
+import pytest
+
 from model_router.cli import main, render_explain, render_log, render_status
 from model_router.config import load_config
 from model_router.decision_log import append_record
@@ -61,6 +63,28 @@ def test_log_renders_decisions_and_events(paths):
 
 def test_log_when_empty(paths):
     assert render_log(paths, 10) == "No decisions logged yet."
+
+
+def test_stats_reads_rotated_files_too(tmp_path, monkeypatch, capsys):
+    state = tmp_path / "state"
+    monkeypatch.setenv("MODEL_ROUTER_STATE_DIR", str(state))
+    monkeypatch.setenv("MODEL_ROUTER_CONFIG", str(tmp_path / "absent.jsonc"))
+    append_record(state / "decisions.jsonl.1", {
+        "ts": NOW, "category": "plan", "action": "set_model", "target": "opus",
+    })
+    append_record(state / "decisions.jsonl", {
+        "ts": NOW, "category": "plan", "action": "keep", "target": None,
+    })
+    assert main(["stats"]) == 0
+    out = capsys.readouterr().out
+    assert "2 decisions, 0 verified results" in out
+    assert out.splitlines()[4].split()[:3] == ["plan", "2", "1"]
+
+
+def test_stats_days_must_be_positive(capsys):
+    with pytest.raises(SystemExit):
+        main(["stats", "--days", "0"])
+    assert "above 0" in capsys.readouterr().err
 
 
 def test_main_reads_locations_from_the_environment(tmp_path, monkeypatch, capsys):
