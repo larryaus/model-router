@@ -42,6 +42,8 @@ and the router checks each routed write task (by default `implement` and
 directory, so it never holds up the session. Exit 0 is a pass, any other
 exit a fail, and a timeout or a command the shell cannot run is unknown.
 
+![When a subagent finishes in the foreground, the hook finds its decision in decisions.jsonl. If verify.command is set and the launch was a routed write task by an agent that can write, it runs the command, reduces the exit to pass, fail, or unknown, asks outcome.judge for the next step, and appends an outcome record that router stats reads.](docs/diagrams/verify.png)
+
 The result, and what the router would do next, is logged as an `outcome`
 record: `pass`, `retry` the same target, `escalate` to the next heavier
 target allowed at the current quota levels, or `human` when none is left.
@@ -59,78 +61,20 @@ affect the result.
 
 ## Architecture
 
-The router is three thin hook adapters around a decision core of pure
+The router is four thin hook adapters around a decision core of pure
 functions. The adapters do the reading and writing; the core takes plain
 values and returns a decision, so it can be tested without Claude Code.
 
-```mermaid
-flowchart TB
-    subgraph CC["Claude Code events"]
-        SL["Status line renders"]
-        UP["Prompt submitted"]
-        AG["Subagent launch<br/>Agent tool"]
-    end
+![Each Claude Code event reaches one hook adapter: the status line saves quota, a prompt can get one line of guidance, a subagent launch is classified and routed, and a finished subagent is verified. Launch decisions and verified results go to decisions.jsonl, which router stats and router log read.](docs/diagrams/architecture.png)
 
-    subgraph AD["Hook adapters · thin, fail open"]
-        SLH["hooks/statusline.py"]
-        PRH["hooks/prompt.py"]
-        PAH["hooks/pre_agent.py"]
-    end
-
-    PT["Your previous<br/>status-line command"]
-    SNAP[("claude-quota.json")]
-
-    subgraph IN["Inputs, read fresh on every run"]
-        QR["quota readers<br/>Claude snapshot · Codex logs"]
-        CFG["config.py<br/>config.jsonc"]
-        PM["hooks/permissions.py<br/>Claude Code settings"]
-    end
-
-    subgraph CORE["Decision core · pure functions"]
-        CL["classify.py<br/>launch to category"]
-        PO["policy.py<br/>levels · eligibility · decide"]
-    end
-
-    subgraph OUT["Outcomes"]
-        HINT["One line of guidance<br/>when a level changes"]
-        DLOG[("decisions.jsonl<br/>every decision")]
-        ACT["Launch kept, given a<br/>new model, or denied"]
-        GR["Redirect to Codex<br/>grants.py issues a grant"]
-    end
-
-    WK["codex-read / codex-write<br/>worker agent"]
-    CR["codex_run.py<br/>redeems the grant"]
-    CX["codex exec<br/>pinned sandbox"]
-
-    SL --> SLH
-    UP --> PRH
-    AG --> PAH
-
-    SLH -- "relays input" --> PT
-    SLH -- "captures quota" --> SNAP
-    SNAP --> QR
-
-    PAH --> CL
-    CL --> PO
-    PRH --> PO
-    QR --> PO
-    CFG --> PO
-    PM --> PO
-
-    PO --> HINT
-    PO --> DLOG
-    PO --> ACT
-    PO --> GR
-
-    GR --> WK
-    WK --> CR
-    CR --> CX
-```
-
-Read it top to bottom. Each Claude Code event reaches one adapter. The two
-hooks hand the launch and the current inputs to the core, and the core's
-answer becomes one of the outcomes at the bottom. The status line takes no
-decisions: it only saves the quota reading that the next decision will use.
+Read it top to bottom, one box per Claude Code event. At a launch, the core
+picks a target from the config, both plans' quota, and the permission rules,
+and the hook applies it unless the mode is shadow. When a subagent finishes,
+the post-launch hook runs your verify command in the background and logs
+what should come next. Both write to `decisions.jsonl`, which `router stats`
+and `router log` read. The status line takes no decisions: it saves the
+quota reading the next decision will use, and passes its input on to your
+previous status-line command.
 
 | Part | Files | Job |
 |---|---|---|
@@ -146,29 +90,7 @@ decisions: it only saves the quota reading that the next decision will use.
 `policy.decide()` applies these steps in order. A Codex target that is not
 eligible is skipped, never downgraded to a weaker sandbox.
 
-```mermaid
-flowchart TD
-    A["Subagent launch"] --> B{"Passthrough agent type<br/>or a route:keep tag?"}
-    B -- yes --> K["keep · launch unchanged"]
-    B -- no --> L["Level per plan from quota<br/>normal · conserve · critical · exhausted"]
-    L --> T{"Tag names a target<br/>that is allowed?"}
-    T -- yes --> U["Use that target"]
-    T -- "no tag, or rejected" --> P["Walk the category's<br/>preference list in order"]
-    P --> Q{"Weight allowed at its plan's level,<br/>and if Codex, redirect-eligible?"}
-    Q -- "no · next entry" --> P
-    Q -- yes --> BAL{"This plan heading over its week<br/>while the other goes to waste?"}
-    BAL -- yes --> PROM["Promote the underused<br/>plan's entry"]
-    BAL -- no --> OUT
-    PROM --> OUT
-    U --> OUT
-    P -- "list used up" --> F{"Any target allowed at all?"}
-    F -- yes --> LIGHT["Lightest allowed target"]
-    LIGHT --> OUT
-    F -- no --> D["deny · with the earliest reset time"]
-    OUT{"Which plan?"}
-    OUT -- Claude --> SM["set model · opus, sonnet or haiku"]
-    OUT -- Codex --> RC["redirect · codex-read or codex-write"]
-```
+![The routing steps: keep a passthrough or route:keep launch; set each plan's level; use an allowed tagged target; otherwise the first preference entry its level allows, promoting the other plan's later entry when this plan is over its week and the other underused; if none, the lightest allowed target or a deny. A Claude target sets the model, a Codex target redirects to a worker.](docs/diagrams/routing.png)
 
 A plan's level is the worst of its 5-hour and weekly windows. Heavy targets
 stop at conserve, medium at critical, and light at exhausted. In shadow mode
@@ -181,31 +103,7 @@ approval to the point where Codex starts, so neither the prompt text nor the
 worker can ask for a wider sandbox, and a worker launched directly has
 nothing to run with.
 
-```mermaid
-sequenceDiagram
-    autonumber
-    participant C as Claude Code
-    participant H as pre_agent hook
-    participant W as Worker agent
-    participant R as codex-run
-    participant X as codex exec
-
-    C->>H: subagent launch
-    Note over H: classify, read quota,<br/>check eligibility, decide
-    Note over H: write a one-time grant<br/>sandbox, effort, model, cwd
-    H-->>C: rewritten launch<br/>prompt carries the nonce
-    C->>W: launch the worker
-    W->>R: prompt file
-    Note over R: redeem the grant<br/>deleted on first use
-    alt grant valid, mode matches
-        R->>X: sandbox and cwd from the grant<br/>owner's Codex config ignored
-        X-->>R: final answer
-        R-->>W: answer
-        W-->>C: answer, verbatim
-    else missing, used, expired, wrong mode
-        R-->>W: refuses, Codex never starts
-    end
-```
+![The pre_agent hook decides, writes a one-time grant, and rewrites the launch so the prompt carries only the nonce. The worker runs codex-run, which redeems the grant: if it is missing, used, stale, or for another mode, it refuses and Codex never starts; otherwise codex exec runs with the grant's sandbox and directory and the answer comes back verbatim.](docs/diagrams/codex-redirect.png)
 
 A launch is eligible for redirect only when its agent type is on the
 redirectable list, it was not launched from inside another subagent, the
@@ -243,3 +141,8 @@ Claude and only its model can change.
     .venv/bin/python -m pytest
 
 Runtime code uses the Python 3.9 standard library only.
+
+The diagrams are Mermaid sources in `docs/diagrams/*.mmd`, shown in this
+README as PNGs because GitHub's mobile app does not render Mermaid. After
+editing a source, regenerate the images with `docs/diagrams/render.js`; the
+steps are at the top of that file.

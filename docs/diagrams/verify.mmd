@@ -1,0 +1,12 @@
+flowchart TB
+    A["Subagent finishes<br/>PostToolUse · async"] --> B{{"Finished in the<br/>foreground,<br/>not nested?"}}
+    B -- no --> N["Nothing runs"]
+    B -- yes --> C["Find its decision in<br/>decisions.jsonl<br/>by tool_use_id"]
+    C --> D{{"verify.command set,<br/>routed write task,<br/>not read-only?"}}
+    D -- no --> N
+    D -- yes --> E["Run verify.command in<br/>the session's directory"]
+    E --> R["exit 0 → pass<br/>other exit → fail<br/>timeout, signal,<br/>cannot run → unknown"]
+    R --> J["outcome.judge"]
+    J --> O["pass · retry same target ·<br/>escalate to a heavier<br/>allowed target · human ·<br/>keep"]
+    O --> L[("outcome record<br/>in decisions.jsonl")]
+    L --> S["router stats"]

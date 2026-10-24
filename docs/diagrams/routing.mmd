@@ -1,0 +1,14 @@
+flowchart TB
+    A["Subagent launch"] --> B{{"Passthrough type<br/>or route:keep tag?"}}
+    B -- yes --> K["keep<br/>launch unchanged"]
+    B -- no --> L["Set each plan's level<br/>from its quota"]
+    L --> T{{"Tag names a<br/>target that<br/>is allowed?"}}
+    T -- no --> P{{"A preference<br/>entry its level<br/>allows?"}}
+    T -- yes --> U["Use the<br/>tagged target"]
+    P -- no --> F["Lightest allowed<br/>target, or deny<br/>with the earliest<br/>reset time"]
+    P -- yes --> BAL{{"Its plan over<br/>its week, the<br/>other underused?"}}
+    BAL -- no --> E["Use that entry"]
+    BAL -- yes --> PROM["Use the other<br/>plan's later entry"]
+    E ~~~ OUT["Whichever target<br/>is used: Claude →<br/>set the model;<br/>Codex → redirect<br/>to codex-read or<br/>codex-write"]
+    classDef note fill:#fff,stroke:#999,stroke-dasharray:4 3
+    class OUT note

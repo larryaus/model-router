@@ -1,0 +1,10 @@
+flowchart TB
+    A["Subagent launch"] --> H["pre_agent hook<br/>classify, read quota,<br/>check eligibility, decide"]
+    H --> G[("One-time grant<br/>sandbox · effort ·<br/>model · cwd")]
+    H --> R["Rewritten launch<br/>worker agent; prompt<br/>carries only the nonce"]
+    R --> W["codex-read / codex-write<br/>writes the prompt file,<br/>runs codex-run"]
+    W --> RD{{"codex-run redeems<br/>the grant: present,<br/>unused, fresh,<br/>same mode?"}}
+    G -. "deleted on<br/>first use" .-> RD
+    RD -- no --> X["Refuses<br/>Codex never starts"]
+    RD -- yes --> C["codex exec<br/>sandbox and cwd<br/>from the grant;<br/>owner's Codex<br/>config ignored"]
+    C --> V["Answer returned<br/>verbatim"]
