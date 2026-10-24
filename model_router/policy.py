@@ -1,5 +1,6 @@
 """The routing policy. Pure: no I/O, and the current time is passed in."""
 
+from functools import partial
 from typing import Callable, Dict, List, NamedTuple, Optional, Sequence, Tuple
 
 from model_router.classify import Classification
@@ -87,6 +88,16 @@ def plan_level(quota: PlanQuota, now: int, config: Config) -> str:
     return level
 
 
+def plan_levels(
+    quotas: Dict[str, PlanQuota], now: int, config: Config
+) -> Dict[str, str]:
+    """Each plan's level. A plan with no quota reading counts as normal."""
+    return {
+        plan: plan_level(quotas.get(plan) or unknown(plan), now, config)
+        for plan in PLANS
+    }
+
+
 def weekly_projection(quota: PlanQuota, now: int, config: Config) -> Optional[float]:
     for window in quota.windows:
         if window.window_minutes == WEEK_MINUTES:
@@ -126,10 +137,34 @@ def redirect_block_reason(launch: Launch, write: bool, config: Config) -> Option
     return None
 
 
+def rejection(
+    target: Target,
+    levels: Dict[str, str],
+    block: Optional[str],
+    soft_levels: bool = True,
+) -> Optional[str]:
+    """Why this target may not be used now, or None if it may.
+
+    Soft levels apply the weight rule: heavy stops at conserve, medium at
+    critical, light at exhausted. Hard levels, used for an explicit route
+    tag, stop a target only when its plan is exhausted. `block` is why a
+    redirect is not allowed, and stops every Codex target.
+    """
+    level = levels[target.plan]
+    if soft_levels:
+        if target.weight not in ALLOWED_WEIGHTS[level]:
+            return "%s %s" % (target.plan, level)
+    elif level == "exhausted":
+        return "%s exhausted" % target.plan
+    if target.plan == "codex" and block is not None:
+        return block
+    return None
+
+
 def _balance(
     later_names: Sequence[str],
     chosen: Target,
-    rejection: Callable[[Target], Optional[str]],
+    reject: Callable[[Target], Optional[str]],
     quotas: Dict[str, PlanQuota],
     config: Config,
     now: int,
@@ -140,7 +175,7 @@ def _balance(
         return None
     for name in later_names:
         candidate = config.targets[name]
-        if candidate.plan == chosen.plan or rejection(candidate) is not None:
+        if candidate.plan == chosen.plan or reject(candidate) is not None:
             continue
         other = weekly_projection(quotas[candidate.plan], now, config)
         if other is not None and other < config.underused:
@@ -172,7 +207,7 @@ def decide(
     now: int,
 ) -> Decision:
     quotas = {plan: quotas.get(plan) or unknown(plan) for plan in PLANS}
-    levels = {plan: plan_level(quotas[plan], now, config) for plan in PLANS}
+    levels = plan_levels(quotas, now, config)
     category = classification.category
 
     if launch.agent_type in ALWAYS_PASSTHROUGH or launch.agent_type in config.passthrough:
@@ -191,16 +226,7 @@ def decide(
         if not quotas[plan].known
     ]
 
-    def rejection(target: Target, soft_levels: bool = True) -> Optional[str]:
-        level = levels[target.plan]
-        if soft_levels:
-            if target.weight not in ALLOWED_WEIGHTS[level]:
-                return "%s %s" % (target.plan, level)
-        elif level == "exhausted":
-            return "%s exhausted" % target.plan
-        if target.plan == "codex" and block is not None:
-            return block
-        return None
+    reject = partial(rejection, levels=levels, block=block)
 
     chosen: Optional[Target] = None
     override = classification.override
@@ -213,7 +239,7 @@ def decide(
         else:
             # An explicit override ignores conserve and critical, but not
             # exhausted and not redirect eligibility.
-            why = rejection(target, soft_levels=False)
+            why = reject(target, soft_levels=False)
             if why is None:
                 chosen = target
                 notes.append("override")
@@ -224,19 +250,19 @@ def decide(
         names = config.preferences[category]
         for index, name in enumerate(names):
             target = config.targets[name]
-            why = rejection(target)
+            why = reject(target)
             if why is not None:
                 notes.append("%s skipped: %s" % (name, why))
                 continue
             chosen = target
-            promoted = _balance(names[index + 1:], target, rejection, quotas, config, now)
+            promoted = _balance(names[index + 1:], target, reject, quotas, config, now)
             if promoted is not None:
                 chosen = promoted[0]
                 notes.append(promoted[1])
             break
 
     if chosen is None:
-        allowed = [t for t in config.targets.values() if rejection(t) is None]
+        allowed = [t for t in config.targets.values() if reject(t) is None]
         if allowed:
             # min() keeps the first of equals, so ties follow config order.
             chosen = min(allowed, key=lambda t: WEIGHTS.index(t.weight))

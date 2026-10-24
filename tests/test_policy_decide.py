@@ -1,7 +1,13 @@
 import pytest
 
 from model_router.classify import Classification
-from model_router.policy import Launch, decide, needs_write, redirect_block_reason
+from model_router.policy import (
+    Launch,
+    decide,
+    needs_write,
+    redirect_block_reason,
+    rejection,
+)
 from model_router.quota.types import unknown
 from tests.helpers import NOW, default_config, quota
 
@@ -154,6 +160,19 @@ def test_read_only_agents_never_get_the_write_worker():
 def test_block_reason_is_none_when_eligible():
     assert redirect_block_reason(launch(), True, CONFIG) is None
     assert redirect_block_reason(launch(mode="default"), False, CONFIG) is None
+
+
+def test_rejection_soft_and_hard_levels():
+    opus, codex = CONFIG.targets["opus"], CONFIG.targets["codex"]
+    critical = {"claude": "critical", "codex": "normal"}
+    assert rejection(opus, critical, None) == "claude critical"
+    assert rejection(opus, critical, None, soft_levels=False) is None
+    exhausted = {"claude": "exhausted", "codex": "normal"}
+    assert rejection(opus, exhausted, None, soft_levels=False) == "claude exhausted"
+    # A redirect block stops Codex targets only, at either strength.
+    normal = {"claude": "normal", "codex": "normal"}
+    assert rejection(codex, normal, "nested launch", soft_levels=False) == "nested launch"
+    assert rejection(opus, normal, "nested launch") is None
 
 
 def test_unknown_quota_is_treated_as_normal_and_noted():
