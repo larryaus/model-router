@@ -29,6 +29,12 @@ LAUNCH = json.dumps({
     "hook_event_name": "PreToolUse", "tool_name": "Agent",
     "tool_input": {"subagent_type": "Explore", "description": "Find it", "prompt": "Find it"},
 })
+FINISHED = json.dumps({
+    "session_id": "s1", "cwd": "/nonexistent-project", "permission_mode": "auto",
+    "hook_event_name": "PostToolUse", "tool_name": "Agent", "tool_use_id": "toolu_1",
+    "tool_input": {"subagent_type": "Explore", "description": "Find it", "prompt": "Find it"},
+    "tool_response": {"status": "completed"},
+})
 PROMPT = json.dumps({
     "session_id": "s1", "hook_event_name": "UserPromptSubmit", "prompt": "hello",
 })
@@ -47,6 +53,8 @@ def probe(tmp_path, argv, stdin):
 @pytest.mark.parametrize("argv,stdin", [
     (["hook", "pre-agent"], LAUNCH),
     (["hook", "prompt"], PROMPT),
+    # With verification off, which is the default.
+    (["hook", "post-agent"], FINISHED),
 ])
 def test_hooks_load_no_heavy_modules(tmp_path, argv, stdin):
     result = probe(tmp_path, argv, stdin)

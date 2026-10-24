@@ -49,9 +49,14 @@ def test_log_renders_decisions_and_events(paths):
         "ts": NOW, "action": "set_model", "target": "opus", "reason": "plan -> opus",
     })
     append_record(paths.log, {"ts": NOW, "event": "hook_error", "error": "boom"})
+    append_record(paths.log, {
+        "ts": NOW, "event": "outcome", "verify": "fail", "outcome": "retry",
+        "target": "sonnet", "reason": "verify failed on sonnet; retry it",
+    })
     text = render_log(paths, 10)
     assert "set_model" in text and "plan -> opus" in text
     assert "hook_error" in text and "boom" in text
+    assert "verify fail" in text and "verify failed on sonnet; retry it" in text
 
 
 def test_log_when_empty(paths):

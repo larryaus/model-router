@@ -48,6 +48,16 @@ def test_defaults_match_the_spec():
     assert (config.conserve, config.critical, config.exhausted) == (70, 90, 98)
     assert config.write_redirect_modes == ["acceptEdits", "bypassPermissions"]
     assert config.statusline_passthrough is None
+    assert config.verify_command is None
+    assert config.verify_categories == ["implement", "debug"]
+    assert (config.verify_timeout, config.verify_retry_same) == (300, 1)
+
+
+def test_verify_merges_like_the_other_sections(tmp_path):
+    result = load_config(write(tmp_path, '{"verify": {"command": "pytest -q"}}'))
+    assert result.status == "valid"
+    assert result.config.verify_command == "pytest -q"
+    assert result.config.verify_categories == ["implement", "debug"]
 
 
 def test_dict_keys_merge_and_list_keys_replace(tmp_path):
@@ -93,6 +103,14 @@ def test_byte_order_mark_is_tolerated(tmp_path):
     ('{"agent_categories": {"Explore": "chores"}}', "agent_categories.Explore"),
     ('{"passthrough": "codex-review"}', "passthrough: expected a list"),
     ('{"statusline": {"passthrough": 5}}', "statusline.passthrough"),
+    ('{"verify": {"command": ""}}', "verify.command"),
+    ('{"verify": {"cmd": "x"}}', "verify.cmd: unknown key"),
+    ('{"verify": {"categories": ["chores"]}}', "verify.categories"),
+    ('{"verify": {"timeout": 0}}', "verify.timeout"),
+    ('{"verify": {"timeout": 7200}}', "verify.timeout"),
+    ('{"verify": {"retry_same": -1}}', "verify.retry_same"),
+    ('{"verify": {"retry_same": 1.5}}', "verify.retry_same"),
+    ('{"verify": {"retry_same": true}}', "verify.retry_same"),
 ])
 def test_invalid_config_is_inert(tmp_path, text, fragment):
     result = load_config(write(tmp_path, text))

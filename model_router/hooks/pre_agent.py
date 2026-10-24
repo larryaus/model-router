@@ -106,6 +106,7 @@ def handle(
         return None
     session_id = payload.get("session_id")
     session_id = session_id if isinstance(session_id, str) else ""
+    tool_use_id = payload.get("tool_use_id")
 
     result = load_config(paths.config)
     if result.config is None:
@@ -148,6 +149,8 @@ def handle(
     append_record(paths.log, {
         "ts": int(now),
         "session_id": session_id,
+        # Lets the post-launch hook find this decision when the launch ends.
+        "tool_use_id": tool_use_id if isinstance(tool_use_id, str) else None,
         "agent_type": agent_type,
         "category": classification.category,
         "classified_by": classification.source,
