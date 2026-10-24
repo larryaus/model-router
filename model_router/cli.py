@@ -1,4 +1,4 @@
-"""The commands a person types: status, explain, log, and codex-run.
+"""The commands a person types: status, explain, log, stats, and codex-run.
 
 Hooks and the status line do not come through here. `entry` dispatches them
 first, so they never pay for argparse or the other imports below.
@@ -12,12 +12,13 @@ from typing import List
 from model_router import codex_run
 from model_router.classify import classify
 from model_router.config import PERMISSION_MODES, PLANS, build_config, load_config
-from model_router.decision_log import read_recent
+from model_router.decision_log import read_all, read_recent
 from model_router.hooks.permissions import has_file_deny_rules, settings_files
 from model_router.paths import Paths, from_env
 from model_router.policy import Launch, decide, plan_level, projected_pct
 from model_router.quota import read_quotas
 from model_router.quota.types import effective_used_pct, format_time, window_label
+from model_router.stats import render_stats
 
 
 def _window_line(window, now: int, config) -> str:
@@ -123,6 +124,13 @@ def render_log(paths: Paths, count: int) -> str:
     return "\n".join(lines)
 
 
+def _positive_int(text: str) -> int:
+    value = int(text)
+    if value <= 0:
+        raise argparse.ArgumentTypeError("expected a whole number above 0")
+    return value
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="router", description="Model router for Claude Code."
@@ -137,6 +145,8 @@ def _parser() -> argparse.ArgumentParser:
     )
     log = commands.add_parser("log", help="show recent decisions")
     log.add_argument("-n", type=int, default=20)
+    stats = commands.add_parser("stats", help="summarize decisions and verified results")
+    stats.add_argument("--days", type=_positive_int, help="only the last N days")
     worker = commands.add_parser("codex-run", help="run one task through Codex")
     worker.add_argument("mode", choices=("read", "write"))
     worker.add_argument("prompt_file")
@@ -155,6 +165,10 @@ def main(argv: List[str]) -> int:
         ))
     elif args.command == "log":
         print(render_log(paths, args.n))
+    elif args.command == "stats":
+        # Weights still matter when the config is broken; use the defaults.
+        config = load_config(paths.config).config or build_config({})[0]
+        print(render_stats(read_all(paths.log), config, now, args.days))
     elif args.command == "codex-run":
         code, text = codex_run.run(args.mode, args.prompt_file, paths.state_dir, now)
         print(text)

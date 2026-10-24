@@ -100,6 +100,7 @@ def handle(payload: Any, paths: Paths, now: int, env: Mapping[str, str]) -> None
         "next_target": outcome.target,
         "reason": outcome.reason,
         "levels": outcome.levels,
-        "mode": config.mode,
+        # The mode the launch was routed in, which says whether `target` ran.
+        "mode": decision.get("mode"),
     })
     return None
