@@ -99,7 +99,8 @@ def test_byte_order_mark_is_tolerated(tmp_path):
     ('{"read_redirect_modes": ["plan"]}', "plan may not be listed"),
     ('{"write_redirect_modes": ["dontAsk"]}', "must be a subset"),
     ('{"write_redirect_modes": ["sometimes"]}', "unknown value 'sometimes'"),
-    ('{"write_categories": ["chores"]}', "unknown value 'chores'"),
+    # Retired: an agent's write tools, not the task's category, pick the sandbox.
+    ('{"write_categories": ["implement"]}', "write_categories: unknown key"),
     ('{"agent_categories": {"Explore": "chores"}}', "agent_categories.Explore"),
     ('{"passthrough": "codex-review"}', "passthrough: expected a list"),
     ('{"statusline": {"passthrough": 5}}', "statusline.passthrough"),

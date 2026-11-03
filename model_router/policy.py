@@ -105,12 +105,15 @@ def weekly_projection(quota: PlanQuota, now: int, config: Config) -> Optional[fl
     return None
 
 
-def needs_write(category: str, agent_type: str, config: Config) -> bool:
-    """Whether a redirect of this launch would need the write-enabled worker."""
-    return (
-        category in config.write_categories
-        and agent_type not in config.readonly_agents
-    )
+def needs_write(agent_type: str, config: Config) -> bool:
+    """Whether a redirect of this launch would need the write-enabled worker.
+
+    Decided by the agent, not the task's category. The category is a guess
+    from the task's words, and a task it calls a plan or a review may still
+    need to edit files. A redirect never runs with less access than the
+    agent it replaces.
+    """
+    return agent_type not in config.readonly_agents
 
 
 def redirect_block_reason(launch: Launch, write: bool, config: Config) -> Optional[str]:
@@ -218,7 +221,7 @@ def decide(
     if classification.override == "keep":
         return Decision("keep", None, "kept by [route:keep]", levels, None)
 
-    write = needs_write(category, launch.agent_type, config)
+    write = needs_write(launch.agent_type, config)
     block = redirect_block_reason(launch, write, config)
     notes: List[str] = [
         "%s quota unknown, treated as normal" % plan

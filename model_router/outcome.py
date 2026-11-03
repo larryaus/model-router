@@ -57,9 +57,7 @@ def judge(
     if verify != "fail":
         return Outcome("keep", None, "verify result unknown", levels)
 
-    block = redirect_block_reason(
-        launch, needs_write(category, launch.agent_type, config), config
-    )
+    block = redirect_block_reason(launch, needs_write(launch.agent_type, config), config)
     # The next launch carries a route tag, and a tag skips the conserve and
     # critical limits. The weight rule is applied here instead, so a retry
     # or an escalation never spends what `decide` would not have.

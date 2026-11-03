@@ -92,13 +92,25 @@ def test_enforce_redirects_to_the_codex_worker(paths):
     assert updated["description"] == "Implement the cache"
 
 
-def test_a_read_redirect_gets_a_read_grant(paths):
+def test_a_read_only_agent_gets_a_read_grant(paths):
     enforce(paths)
-    request = payload(description="Review the cache", prompt="Review the cache layer")
+    request = payload(
+        description="Find the cache", prompt="[route:codex] Find the cache layer",
+        subagent_type="Explore",
+    )
     updated = output(handle(request, paths, NOW, {}))["updatedInput"]
     assert updated["subagent_type"] == "model-router:codex-read"
     nonce = updated["prompt"].partition("\n")[0][len("ROUTER_GRANT: "):]
     assert grants.redeem(paths.state_dir, nonce, NOW)["mode"] == "read"
+
+
+def test_a_review_by_an_agent_that_can_write_gets_a_write_grant(paths):
+    enforce(paths)
+    request = payload(description="Review the cache", prompt="Review the cache layer")
+    updated = output(handle(request, paths, NOW, {}))["updatedInput"]
+    assert updated["subagent_type"] == "model-router:codex-write"
+    nonce = updated["prompt"].partition("\n")[0][len("ROUTER_GRANT: "):]
+    assert grants.redeem(paths.state_dir, nonce, NOW)["mode"] == "write"
 
 
 def test_shadow_mode_issues_no_grant(paths):
