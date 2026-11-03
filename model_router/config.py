@@ -64,7 +64,6 @@ DEFAULTS: Dict[str, Any] = {
     ],
     "redirectable": ["general-purpose", "claude", "Explore", "Plan", "explorer"],
     "readonly_agents": ["Explore", "Plan", "explorer"],
-    "write_categories": ["implement", "debug", "default"],
     "read_redirect_modes": ["default", "auto", "acceptEdits", "bypassPermissions"],
     "write_redirect_modes": ["acceptEdits", "bypassPermissions"],
     "statusline": {"passthrough": None},
@@ -105,7 +104,6 @@ class Config(NamedTuple):
     passthrough: List[str]
     redirectable: List[str]
     readonly_agents: List[str]
-    write_categories: List[str]
     read_redirect_modes: List[str]
     write_redirect_modes: List[str]
     statusline_passthrough: Optional[str]
@@ -316,9 +314,6 @@ def build_config(raw: Any) -> Tuple[Optional[Config], List[str]]:
     passthrough = _str_list(data["passthrough"], "passthrough", errors)
     redirectable = _str_list(data["redirectable"], "redirectable", errors)
     readonly_agents = _str_list(data["readonly_agents"], "readonly_agents", errors)
-    write_categories = _str_list(
-        data["write_categories"], "write_categories", errors, allowed=CATEGORIES
-    )
     read_modes = _str_list(
         data["read_redirect_modes"], "read_redirect_modes", errors,
         allowed=PERMISSION_MODES,
@@ -382,7 +377,6 @@ def build_config(raw: Any) -> Tuple[Optional[Config], List[str]]:
             passthrough=passthrough,
             redirectable=redirectable,
             readonly_agents=readonly_agents,
-            write_categories=write_categories,
             read_redirect_modes=read_modes,
             write_redirect_modes=write_modes,
             statusline_passthrough=passthrough_command,

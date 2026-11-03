@@ -30,7 +30,16 @@ def test_description_is_checked_before_prompt():
 
 
 def test_categories_are_tested_in_a_fixed_order():
-    assert run("debug and review the handler").category == "review"
+    assert run("Then debug and review the handler").category == "review"
+
+
+def test_a_leading_keyword_wins_over_the_order():
+    assert run("Implement plan task 3").category == "implement"
+    assert run("Debug and review the handler").category == "debug"
+
+
+def test_a_leading_keyword_in_the_prompt_wins_after_a_route_tag():
+    assert run("Cache work", "[route:opus] Implement the plan").category == "implement"
 
 
 def test_keywords_match_whole_words_only():

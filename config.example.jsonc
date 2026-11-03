@@ -52,8 +52,10 @@
                   "statusline-setup", "claude-code-guide"],
   // Agent types that may be sent to Codex. Others get Claude model changes only.
   "redirectable": ["general-purpose", "claude", "Explore", "Plan", "explorer"],
+  // Agent types with no write tools. Only these go to read-only Codex. Any
+  // other agent can write, so its redirect needs write_redirect_modes,
+  // whatever the task's category.
   "readonly_agents": ["Explore", "Plan", "explorer"],
-  "write_categories": ["implement", "debug", "default"],
 
   // Session permission modes in which a task may be sent to Codex.
   // Add "auto" to write_redirect_modes to allow unattended edits inside the

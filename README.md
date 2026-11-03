@@ -105,6 +105,11 @@ nothing to run with.
 
 ![The pre_agent hook decides, writes a one-time grant, and rewrites the launch so the prompt carries only the nonce. The worker runs codex-run, which redeems the grant: if it is missing, used, stale, or for another mode, it refuses and Codex never starts; otherwise codex exec runs with the grant's sandbox and directory and the answer comes back verbatim.](docs/diagrams/codex-redirect.png)
 
+The sandbox follows the agent, not the task's category, which is only a
+guess from the task's words. An agent type on `readonly_agents` goes to
+read-only Codex. Any other agent can write, so its redirect is a write
+redirect, even for a task classified as a plan or a review.
+
 A launch is eligible for redirect only when its agent type is on the
 redirectable list, it was not launched from inside another subagent, the
 session's permission mode allows that sandbox, and no file-scoped deny or ask

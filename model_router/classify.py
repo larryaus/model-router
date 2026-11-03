@@ -24,12 +24,24 @@ def _has_keyword(text: str, keyword: str) -> bool:
     return re.search(pattern, text, re.IGNORECASE) is not None
 
 
+def _leads_with_keyword(text: str, keyword: str) -> bool:
+    """Whether the text opens with the keyword, after any spaces or markup."""
+    pattern = r"[^A-Za-z0-9]*" + re.escape(keyword) + r"(?![A-Za-z0-9_])"
+    return re.match(pattern, text, re.IGNORECASE) is not None
+
+
 def _category(
     agent_type: str, description: str, prompt: str, config: Config
 ) -> Tuple[str, str]:
     if agent_type in config.agent_categories:
         return config.agent_categories[agent_type], "agent_type"
     for text in (description, prompt[:PROMPT_SCAN_CHARS]):
+        # A task usually opens with its verb, as in "Implement plan task 3",
+        # and later words name what it works on. So an opening keyword wins
+        # over the fixed order below.
+        for category in KEYWORD_CATEGORIES:
+            if any(_leads_with_keyword(text, word) for word in config.keywords[category]):
+                return category, "keyword"
         for category in KEYWORD_CATEGORIES:
             if any(_has_keyword(text, word) for word in config.keywords[category]):
                 return category, "keyword"

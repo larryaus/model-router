@@ -57,6 +57,17 @@ def test_escalation_follows_the_category_preferences():
     assert outcome.reason == "verify failed on sonnet; escalate to codex-deep"
 
 
+def test_escalation_keeps_the_agent_write_access_whatever_the_category():
+    # In auto mode only reads may go to Codex, and a general-purpose agent
+    # can write, so a review is not escalated to Codex.
+    outcome = run(["sonnet", "sonnet"], category="review", mode="auto")
+    assert (outcome.action, outcome.target) == ("escalate", "opus")
+    assert (
+        "codex-deep skipped: permission mode auto does not allow a write redirect"
+        in outcome.reason
+    )
+
+
 def test_escalation_skips_a_heavy_target_on_a_conserving_plan():
     # opus is not in implement's preferences, so it comes from the rest.
     outcome = run(["sonnet", "sonnet"], codex=quota("codex", five=75))

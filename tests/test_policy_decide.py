@@ -49,7 +49,7 @@ def test_a_codex_first_preference_redirects_with_the_write_worker():
 def test_conserve_skips_heavy_targets_on_that_plan():
     decision = run("plan", claude=quota("claude", five=75))
     assert (decision.action, decision.target, decision.worker) == (
-        "redirect_codex", "codex-deep", "codex-read",
+        "redirect_codex", "codex-deep", "codex-write",
     )
     assert "opus skipped: claude conserve" in decision.reason
 
@@ -124,7 +124,7 @@ def test_write_redirect_by_permission_mode(mode, redirects):
     ("acceptEdits", True), ("bypassPermissions", True),
 ])
 def test_read_redirect_by_permission_mode(mode, redirects):
-    decision = run("review", mode=mode)
+    decision = run("review", mode=mode, agent_type="Explore")
     if redirects:
         assert (decision.action, decision.target, decision.worker) == (
             "redirect_codex", "codex-deep", "codex-read",
@@ -150,11 +150,29 @@ def test_blocked_redirects_stay_on_claude(launch_args, fragment):
 
 
 def test_read_only_agents_never_get_the_write_worker():
-    assert needs_write("implement", "general-purpose", CONFIG) is True
-    assert needs_write("implement", "Explore", CONFIG) is False
-    assert needs_write("review", "general-purpose", CONFIG) is False
+    assert needs_write("general-purpose", CONFIG) is True
+    assert needs_write("Explore", CONFIG) is False
     decision = run("implement", agent_type="Explore", mode="default")
     assert (decision.action, decision.worker) == ("redirect_codex", "codex-read")
+
+
+@pytest.mark.parametrize("category", ["plan", "review", "explore"])
+def test_an_agent_that_can_write_gets_the_write_worker_in_any_category(category):
+    # The category is a guess from the task's words, and "Implement the plan"
+    # reads as plan. Whatever the guess, a Codex run that replaces an agent
+    # with write tools can write too.
+    decision = run(category, claude=quota("claude", five=99))
+    assert (decision.action, decision.worker) == ("redirect_codex", "codex-write")
+
+
+@pytest.mark.parametrize("category", ["plan", "review"])
+def test_an_agent_that_can_write_stays_on_claude_where_writes_may_not_redirect(category):
+    decision = run(category, claude=quota("claude", five=75), mode="auto")
+    assert (decision.action, decision.target) == ("set_model", "sonnet")
+    assert (
+        "codex-deep skipped: permission mode auto does not allow a write redirect"
+        in decision.reason
+    )
 
 
 def test_block_reason_is_none_when_eligible():
